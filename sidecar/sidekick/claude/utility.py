@@ -140,7 +140,17 @@ class UtilityLLM:
         from claude_agent_sdk import ClaudeSDKClient
 
         client = ClaudeSDKClient(build_options(model, system, self._cli_path))
-        await client.connect()
+        # Spawning claude.exe occasionally fails transiently on Windows ([WinError 50]
+        # when several children start within milliseconds); a short retry fixes it.
+        for attempt in range(3):
+            try:
+                await client.connect()
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 2 or "WinError" not in str(exc) and "start" not in str(exc).lower():
+                    raise
+                log.warning("claude client start failed (attempt %d): %s; retrying", attempt + 1, exc)
+                await asyncio.sleep(0.5 * (attempt + 1))
         warm = _Warm(client=client, model=model, system=system)
         self._clients[key] = warm
         log.info("warm claude client ready for %s (%s)", model, key)
