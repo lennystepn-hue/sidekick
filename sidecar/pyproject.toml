@@ -1,0 +1,55 @@
+[project]
+name = "sidekick-sidecar"
+version = "0.1.0"
+description = "Sidekick sidecar: audio, Bluetooth, gestures, STT/TTS and Claude integration for the Ray-Ban Meta companion"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "websockets>=13",
+  "pydantic>=2.7",
+  "platformdirs>=4",
+  "tomli-w>=1",
+  "numpy>=1.26",
+  "sounddevice>=0.5",
+  "faster-whisper>=1.1",
+  "onnxruntime>=1.18",
+  "miniaudio>=1.60",
+  "pycaw>=20240210",
+  "comtypes>=1.4",
+  "keyring>=25",
+  "elevenlabs>=1.50",
+  "edge-tts>=7",
+  "claude-agent-sdk>=0.2.150",
+  "httpx>=0.27",
+  "psutil>=6",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+  "pyinstaller>=6.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sidekick"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["E501"]
