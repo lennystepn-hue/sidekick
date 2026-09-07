@@ -3,7 +3,7 @@
 #   pwsh sidecar/tools/build_sidecar.ps1            # build + stage + smoke test
 #   pwsh sidecar/tools/build_sidecar.ps1 -SkipTest
 #
-# Output: src-tauri/binaries/sidekick-sidecar-x86_64-pc-windows-msvc.exe + src-tauri/binaries/_internal/
+# Output: src-tauri/binaries/sidekick-sidecar-<triple>.exe (msvc and gnu) + src-tauri/binaries/_internal/
 param(
     [switch]$SkipTest,
     [int]$TestPort = 47899
@@ -24,7 +24,10 @@ try {
     Write-Host "== Staging into $target =="
     New-Item -ItemType Directory -Force $target | Out-Null
     if (Test-Path (Join-Path $target "_internal")) { Remove-Item -Recurse -Force (Join-Path $target "_internal") }
-    Copy-Item (Join-Path $dist "sidekick-sidecar.exe") (Join-Path $target "sidekick-sidecar-x86_64-pc-windows-msvc.exe") -Force
+    # Tauri looks for <name>-<target triple>.exe; stage both triples so msvc and gnu toolchains work.
+    foreach ($triple in @("x86_64-pc-windows-msvc", "x86_64-pc-windows-gnu")) {
+        Copy-Item (Join-Path $dist "sidekick-sidecar.exe") (Join-Path $target "sidekick-sidecar-$triple.exe") -Force
+    }
     Copy-Item (Join-Path $dist "_internal") (Join-Path $target "_internal") -Recurse -Force
     $size = [math]::Round(((Get-ChildItem $target -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
     Write-Host "staged ($size MB)"

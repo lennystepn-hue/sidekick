@@ -43,7 +43,9 @@ Data lives in `%APPDATA%\Sidekick\` (`config.toml`, `sidekick.db`, `models\`, `l
 - Embedded session via API (`/session/start`, `/session/send`): a Haiku turn with a Read-tool permission callback completes in ~10 s; permission requests surface as `permission_request` events and are resolved via `/session/permission/{id}`.
 - Hooks: `POST /hook/Stop` plays `done` and speaks a two-sentence summary; `PermissionRequest` plays `needs_input`, sets attention, `UserPromptSubmit` clears it.
 
-Not verifiable here: Bluetooth connection to the glasses, A2DP/HFP switching on a real headset, whether the touchpad "hold" gesture reaches Windows as a media key (use the gesture test view in the UI).
+Later the same evening, after the Bluetooth adapter recovered and the glasses were paired: presence saw the glasses connect, audio was routed to the A2DP endpoint, the Hands-Free capture opened, Whisper transcribed a spoken sentence, and disconnecting restored the previous output device. Playback initially hit PortAudio's "Invalid sample rate" fallback (choppy tones); output now opens WASAPI in shared mode with automatic conversion, and the fallback resampler is seam-free.
+
+Not verified yet: whether the touchpad "hold" gesture reaches Windows as a media key (use the gesture test view in the UI).
 
 ## Packaging
 

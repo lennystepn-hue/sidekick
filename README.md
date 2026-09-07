@@ -65,6 +65,10 @@ Einstellungen → Hooks → Projekt wählen → Installieren. Das schreibt in di
 
 `%APPDATA%\Sidekick\config.toml` (im UI editierbar), `sidekick.db` (Sessions, Nachrichten, Transkripte, btw), `models\` (Whisper), `logs\sidecar.log`. Keine Cloud-Persistenz.
 
+## Toolchain-Hinweis (Rust)
+
+Auf diesem Rechner sind keine MSVC Build Tools installiert, deshalb pinnt `src-tauri/rust-toolchain.toml` die `x86_64-pc-windows-gnu`-Toolchain und `src-tauri/.cargo/config.toml` zeigt auf die MSYS2-Binutils (`C:\msys64\mingw64\bin`, Pakete `mingw-w64-x86_64-binutils` und `mingw-w64-x86_64-gcc`). Sobald "Desktop development with C++" (Visual Studio Build Tools) installiert ist, können beide Dateien gelöscht werden; dann baut Tauri mit dem Standard-MSVC-Toolchain. Der Sidecar wird für beide Target-Triples gestaged.
+
 ## Bekannte Grenzen und Fehlerbilder
 
 - Kamera und Capture-Knopf gehen unter Windows nicht (kein Device Access Toolkit).
@@ -77,4 +81,5 @@ Einstellungen → Hooks → Projekt wählen → Installieren. Das schreibt in di
 
   Hilft das nicht: Rechner vollständig herunterfahren, 30 Sekunden warten, einschalten. Ein Neustart reicht oft nicht, weil der USB-Teil des Adapters stromlos werden muss.
 - Whisper `small` auf CPU braucht etwa 0,7-fache Echtzeit; `base` ist schneller und für kurze Anweisungen meist gut genug.
+- Audio wird immer über WASAPI (Shared Mode, automatische Konvertierung) ausgegeben, damit 44,1-kHz-Töne und 24-kHz-Sprache auf einem 48-kHz-Endpunkt sauber laufen. Erscheint im Log `using ... Hz with seamless resampling`, akzeptiert das Gerät keine Konvertierung; dann resampelt Sidekick selbst nahtlos.
 - Wake-Word, Deepgram-STT und macOS/Linux sind nicht im MVP.
