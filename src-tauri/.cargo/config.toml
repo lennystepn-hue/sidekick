@@ -1,0 +1,15 @@
+# Companion to ../rust-toolchain.toml (windows-gnu toolchain because this
+# machine has no MSVC Build Tools).
+#
+# rustc builds import libraries for `raw-dylib` links on windows-gnu with GNU
+# `dlltool`, which it only looks up on PATH. The rustup toolchain's bundled
+# self-contained dlltool cannot be used: it shells out to `as`, which rustup does
+# not ship. The MSYS2 binutils at C:\msys64\mingw64\bin provide both, so point
+# rustc there explicitly (rustc's working directory changes per crate, hence an
+# absolute path). The self-contained MinGW linker from rustup is still used for
+# linking.
+#
+# Delete this file together with rust-toolchain.toml once MSVC Build Tools are
+# installed (the flag is ignored on msvc targets anyway).
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "dlltool=C:/msys64/mingw64/bin/dlltool.exe"]

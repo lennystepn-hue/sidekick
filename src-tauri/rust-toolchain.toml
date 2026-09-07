@@ -1,0 +1,10 @@
+# This machine has no MSVC Build Tools (rustc's default `link.exe` resolves to
+# Git's coreutils `link`, so every msvc link step fails). The windows-gnu
+# toolchain bundles its own MinGW linker (self-contained gcc/ld), so pin it for
+# everything under src-tauri: plain `cargo` and `pnpm tauri dev|build` both go
+# through the rustup proxy and honour this file.
+#
+# Once "Desktop development with C++" (VS Build Tools) is installed this file
+# can be deleted to return to the default x86_64-pc-windows-msvc toolchain.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
