@@ -118,6 +118,7 @@ class HookHandler:
         session.seq = self._seq
         session.active = True
         summary = ""
+        log.info("hook %s from session %s (%s)", event, sid, session.cwd or "?")
         try:
             summary = await self._dispatch(event, session, payload)
         except Exception:  # noqa: BLE001

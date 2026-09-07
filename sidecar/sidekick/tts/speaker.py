@@ -110,6 +110,7 @@ class Speaker:
     async def _say(self, utt: Utterance) -> None:
         self.last_text = utt.text
         self.spoken.append(utt)
+        log.info("speaking [%s]: %s", utt.kind, utt.text[:200])
         self._bus.publish("spoken", {"text": utt.text, "kind": utt.kind})
         errors: list[str] = []
         for name in self._order():
