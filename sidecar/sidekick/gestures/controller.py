@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -37,6 +38,7 @@ class GestureController:
         self._loop: asyncio.AbstractEventLoop | None = None
         self.hook = hook_factory(self._on_key, self._should_swallow)
         self.log: deque[dict[str, Any]] = deque(maxlen=100)
+        self._log_lock = threading.Lock()
 
     def start(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -58,7 +60,8 @@ class GestureController:
             "swallowed": swallowed,
             "injected": injected,
         }
-        self.log.append(entry)
+        with self._log_lock:
+            self.log.append(entry)
         self._bus.publish("media_key", entry)
         if action == "none":
             return
@@ -75,9 +78,19 @@ class GestureController:
         try:
             result = fn()
             if asyncio.iscoroutine(result):
-                asyncio.ensure_future(result)
+                task = asyncio.ensure_future(result)
+                task.add_done_callback(_log_task_error)
         except Exception:  # noqa: BLE001
             log.exception("gesture action %s failed", action)
 
     def entries(self, limit: int = 50) -> list[dict[str, Any]]:
-        return list(self.log)[-limit:]
+        with self._log_lock:
+            return list(self.log)[-limit:]
+
+
+def _log_task_error(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error("gesture action failed: %r", exc)

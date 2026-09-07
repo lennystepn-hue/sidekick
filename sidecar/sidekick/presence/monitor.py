@@ -115,6 +115,7 @@ class PresenceMonitor:
         self._settings = settings
         self._on_transition = on_transition
         self._task: asyncio.Task | None = None
+        self._tick_lock = asyncio.Lock()
         self.machine = PresenceState()
         self.last_sample: PresenceSample | None = None
         self.last_tick = 0.0
@@ -138,6 +139,10 @@ class PresenceMonitor:
         )
 
     async def tick(self) -> list[str]:
+        async with self._tick_lock:  # manual ticks (UI) must not race the poll loop
+            return await self._tick()
+
+    async def _tick(self) -> list[str]:
         try:
             sample = await asyncio.to_thread(self.sample)
         except Exception as exc:  # noqa: BLE001

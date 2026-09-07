@@ -15,6 +15,8 @@ from .base import TtsEngine
 log = logging.getLogger(__name__)
 
 BUSY_MODES = ("listening", "btw_listening", "transcribing")
+FIRST_CHUNK_TIMEOUT_S = 20.0
+CHUNK_TIMEOUT_S = 30.0
 
 
 @dataclass(slots=True)
@@ -122,11 +124,22 @@ class Speaker:
             handle, finished = self._player.play_stream()
             wrote = False
             try:
-                async for chunk in engine.synthesize(utt.text):
+                agen = engine.synthesize(utt.text).__aiter__()
+                first = True
+                while True:
+                    try:
+                        # A stalled network must not block the player thread forever.
+                        chunk = await asyncio.wait_for(agen.__anext__(), FIRST_CHUNK_TIMEOUT_S if first else CHUNK_TIMEOUT_S)
+                    except StopAsyncIteration:
+                        break
+                    first = False
                     handle.write(chunk)
                     wrote = True
                 handle.end()
                 await asyncio.to_thread(finished.wait)
+                if handle.error is not None:
+                    errors.append(f"{name}: Wiedergabe fehlgeschlagen ({handle.error})")
+                    continue
                 if wrote:
                     return
                 errors.append(f"{name}: leer")

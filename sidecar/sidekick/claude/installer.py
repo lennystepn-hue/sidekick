@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +15,13 @@ def hook_url(port: int, event: str) -> str:
     return f"http://127.0.0.1:{port}/hook/{event}"
 
 
+_SIDEKICK_URL = re.compile(r"^https?://(127\.0\.0\.1|localhost):\d+/hook(/[A-Za-z]+)?/?$")
+
+
 def is_sidekick_hook(hook: Any) -> bool:
     if not isinstance(hook, dict) or hook.get("type") != "http":
         return False
-    url = str(hook.get("url", ""))
-    return ("127.0.0.1" in url or "localhost" in url) and "/hook" in url
+    return bool(_SIDEKICK_URL.match(str(hook.get("url", "")).strip()))
 
 
 def settings_file(project: str | Path | None, scope: str) -> Path:

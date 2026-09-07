@@ -21,6 +21,7 @@ from ..state import AppState, SessionInfo
 log = logging.getLogger(__name__)
 
 DoneHandler = Callable[[str], Awaitable[None] | None]
+SETTING_SOURCES = ["user", "project", "local"]
 
 
 @dataclass
@@ -108,6 +109,7 @@ class EmbeddedSession:
         on_done: DoneHandler | None = None,
         on_needs_input: Callable[[PendingPermission], Awaitable[None] | None] | None = None,
         client_factory: Callable[[Any], Any] | None = None,
+        attention_refresh: Callable[[], None] | None = None,
     ) -> None:
         self._settings = settings
         self._state = state
@@ -116,6 +118,7 @@ class EmbeddedSession:
         self._on_done = on_done
         self._on_needs_input = on_needs_input
         self._client_factory = client_factory or self._default_client
+        self._attention_refresh = attention_refresh
         self._client: Any = None
         self._reader: asyncio.Task | None = None
         self.pending: dict[str, PendingPermission] = {}
@@ -124,6 +127,7 @@ class EmbeddedSession:
         self.cwd: str | None = None
         self._last_assistant_text = ""
         self._stream_message_id: str | None = None
+        self._interrupted = False
 
     # --- helpers -------------------------------------------------------
     @staticmethod
@@ -142,6 +146,7 @@ class EmbeddedSession:
             permission_mode="default",
             can_use_tool=self._can_use_tool,
             include_partial_messages=True,
+            setting_sources=list(SETTING_SOURCES),
             cli_path=cfg.cli_path or None,
         )
 
@@ -149,19 +154,33 @@ class EmbeddedSession:
     def running(self) -> bool:
         return self._client is not None and self._reader is not None and not self._reader.done()
 
+    @property
+    def client_active(self) -> bool:
+        """A CLI process may still be attached even after the reader ended."""
+        return self._client is not None
+
     def info(self) -> SessionInfo | None:
         return self._state.session
 
+    def _clear_attention(self) -> None:
+        if self._attention_refresh is not None:
+            self._attention_refresh()
+        else:
+            self._state.update(attention="none")
+
     # --- lifecycle -----------------------------------------------------
     async def start(self, cwd: str, model: str | None = None) -> SessionInfo:
-        if self.running:
+        if self._client is not None:
             await self.stop()
         self.session_id = new_id()
+        self.sdk_session_id = None
         self.cwd = cwd
         self._last_assistant_text = ""
+        self._interrupted = False
         options = self._build_options(cwd, model)
-        self._client = self._client_factory(options)
-        await self._client.connect()
+        client = self._client_factory(options)
+        await client.connect()
+        self._client = client
         info = SessionInfo(
             id=self.session_id,
             cwd=cwd,
@@ -171,7 +190,8 @@ class EmbeddedSession:
             started_at=now_iso(),
         )
         self._db.add_session(self.session_id, cwd, "embedded")
-        self._state.update(session=info, attention="none")
+        self._state.update(session=info)
+        self._clear_attention()
         self._reader = asyncio.create_task(self._read_loop(), name="embedded-reader")
         log.info("embedded session %s started in %s", self.session_id, cwd)
         return info
@@ -181,9 +201,9 @@ class EmbeddedSession:
             if not pending.future.done():
                 pending.future.set_result(("deny", None, "Session beendet"))
         self.pending.clear()
-        if self._reader:
-            self._reader.cancel()
-            self._reader = None
+        reader, self._reader = self._reader, None
+        if reader is not None and not reader.done():
+            reader.cancel()
         client, self._client = self._client, None
         if client is not None:
             try:
@@ -194,7 +214,7 @@ class EmbeddedSession:
             self._db.end_session(self.session_id)
         if self._state.session is not None:
             self._state.update_session(status="stopped")
-        self._state.update(attention="none")
+        self._clear_attention()
         log.info("embedded session stopped")
 
     async def send(self, text: str) -> None:
@@ -206,10 +226,12 @@ class EmbeddedSession:
         msg = self._db.add_message(self.session_id, "user", [{"type": "text", "text": text}])
         self._bus.publish("message", msg)
         self._state.update_session(status="running")
+        self._interrupted = False
         await self._client.query(text)
 
     async def interrupt(self) -> None:
         if self.running:
+            self._interrupted = True
             await self._client.interrupt()
 
     # --- permissions ---------------------------------------------------
@@ -249,8 +271,9 @@ class EmbeddedSession:
         finally:
             self.pending.pop(pending.id, None)
             if not self.pending:
-                self._state.update(attention="none")
-                self._state.update_session(status="running")
+                if self._state.session is not None and self._state.session.status == "waiting":
+                    self._state.update_session(status="running")
+                self._clear_attention()
         self._bus.publish("permission_resolved", {"id": pending.id, "decision": decision})
         if decision == "deny":
             return PermissionResultDeny(message=message or "Vom Nutzer abgelehnt")
@@ -284,19 +307,32 @@ class EmbeddedSession:
 
     # --- reading -------------------------------------------------------
     async def _read_loop(self) -> None:
+        client = self._client
+        ended_unexpectedly = False
         try:
-            async for message in self._client.receive_messages():
+            async for message in client.receive_messages():
                 try:
                     await self._handle(message)
                 except Exception:  # noqa: BLE001
                     log.exception("failed to handle sdk message")
+            ended_unexpectedly = self._client is client
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
-            log.error("embedded session reader ended: %s", exc)
-            self._bus.publish("error", {"module": "session", "message": f"Session abgebrochen: {exc}"})
-            if self._state.session is not None:
-                self._state.update_session(status="stopped")
+            ended_unexpectedly = self._client is client
+            if ended_unexpectedly:
+                log.error("embedded session reader ended: %s", exc)
+                self._bus.publish("error", {"module": "session", "message": f"Session abgebrochen: {exc}"})
+        finally:
+            if ended_unexpectedly:
+                log.warning("embedded session CLI exited")
+                if self._state.session is not None:
+                    self._state.update_session(status="stopped")
+                for pending in list(self.pending.values()):
+                    if not pending.future.done():
+                        pending.future.set_result(("deny", None, "Session beendet"))
+                self.pending.clear()
+                self._clear_attention()
 
     async def _handle(self, message: Any) -> None:
         from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, UserMessage
@@ -356,10 +392,15 @@ class EmbeddedSession:
             self.sdk_session_id = message.session_id or self.sdk_session_id
             self._state.update_session(status="idle")
             final = self._last_assistant_text or (message.result or "")
+            interrupted, self._interrupted = self._interrupted, False
             if message.is_error:
                 self._bus.publish(
                     "error", {"module": "session", "message": message.result or message.subtype}
                 )
+                return
+            if interrupted:
+                log.info("turn interrupted; not announcing")
+                return
             if self._on_done is not None:
                 try:
                     result = self._on_done(final)

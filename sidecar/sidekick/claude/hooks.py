@@ -86,6 +86,7 @@ class HookHandler:
         summarizer: Summarizer,
         settings: Callable[[], Settings],
         embedded_waiting: Callable[[], bool] | None = None,
+        ignore_session_ids: Callable[[], set[str]] | None = None,
     ) -> None:
         self._state = state
         self._bus = bus
@@ -95,6 +96,7 @@ class HookHandler:
         self._summarizer = summarizer
         self._settings = settings
         self._embedded_waiting = embedded_waiting or (lambda: False)
+        self._ignore_session_ids = ignore_session_ids or (lambda: set())
         self.sessions: dict[str, ExternalSession] = {}
         self._recent: dict[str, float] = {}
         self._seq = 0
@@ -118,6 +120,11 @@ class HookHandler:
         sid = str(payload.get("session_id") or "unknown")
         cwd = str(payload.get("cwd") or "")
         self._db.add_hook_event(event, sid, payload)
+        if sid in self._ignore_session_ids():
+            # The embedded session loads the project's settings, so its own hooks fire too;
+            # the SDK already tells us everything about that session.
+            log.debug("ignoring hook %s from embedded session %s", event, sid)
+            return
         session = self.sessions.get(sid)
         if session is None:
             session = ExternalSession(session_id=sid)
@@ -183,8 +190,10 @@ class HookHandler:
         if ntype == "permission_prompt" or (isinstance(data, dict) and data.get("tool_name")):
             tool_name = str(data.get("tool_name") or "")
             tool_input = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
-            key = self._perm_key(session.session_id, data.get("tool_use_id"), tool_name, tool_input)
-            if self._duplicate(key):
+            keys = self._perm_keys(
+                session.session_id, data.get("tool_use_id") or payload.get("tool_use_id"), tool_name, tool_input
+            )
+            if self._duplicate(*keys):
                 return ""
             spoken = self._summarizer.format_permission(tool_name, tool_input, message or None)
         else:
@@ -201,8 +210,8 @@ class HookHandler:
     async def _on_permission(self, session: ExternalSession, payload: dict[str, Any]) -> str:
         tool_name = str(payload.get("tool_name") or "")
         tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-        key = self._perm_key(session.session_id, payload.get("tool_use_id"), tool_name, tool_input)
-        if self._duplicate(key):
+        keys = self._perm_keys(session.session_id, payload.get("tool_use_id"), tool_name, tool_input)
+        if self._duplicate(*keys):
             return ""
         session.attention = True
         spoken = self._summarizer.format_permission(tool_name, tool_input)
@@ -212,26 +221,32 @@ class HookHandler:
 
     # --- helpers ---------------------------------------------------------
     @staticmethod
-    def _perm_key(sid: str, tool_use_id: Any, tool_name: str, tool_input: dict[str, Any]) -> str:
-        if tool_use_id:
-            return f"{sid}:perm:{tool_use_id}"
+    def _perm_keys(sid: str, tool_use_id: Any, tool_name: str, tool_input: dict[str, Any]) -> list[str]:
+        """Both an id-based and a content-based key, so PermissionRequest and the matching
+        Notification dedupe each other even when only one of them carries the tool_use_id."""
         digest = hashlib.sha1(json.dumps(tool_input, sort_keys=True, default=str).encode()).hexdigest()[:10]
-        return f"{sid}:perm:{tool_name}:{digest}"
+        keys = [f"{sid}:perm:{tool_name}:{digest}"]
+        if tool_use_id:
+            keys.append(f"{sid}:perm:{tool_use_id}")
+        return keys
 
-    def _duplicate(self, key: str) -> bool:
+    def _duplicate(self, *keys: str) -> bool:
         now = time.time()
         for k, ts in list(self._recent.items()):
             if now - ts > DEDUPE_WINDOW_S:
                 del self._recent[k]
-        if key in self._recent:
-            return True
-        self._recent[key] = now
-        return False
+        seen = any(k in self._recent for k in keys)
+        for k in keys:
+            self._recent[k] = now
+        return seen
 
-    def _refresh_state(self) -> None:
+    def refresh_state(self) -> None:
+        """Recompute attention/external session count (also called by the embedded session)."""
         active = [s for s in self.sessions.values() if s.active]
         waiting = any(s.attention for s in active) or self._embedded_waiting()
         self._state.update(
             external_sessions=len(active),
             attention="waiting_input" if waiting else "none",
         )
+
+    _refresh_state = refresh_state

@@ -73,7 +73,7 @@ def test_build_question_answers():
             "multiSelect": True,
         }
     ]
-    assert build_question_answers(multi, "tests und docs") == {"Welche Teile?": ["Tests", "Docs"]}
+    assert build_question_answers(multi, "tests und docs") == {"Welche Teile?": "Tests, Docs"}
 
 
 # --- embedded session with a fake SDK client ----------------------------------------

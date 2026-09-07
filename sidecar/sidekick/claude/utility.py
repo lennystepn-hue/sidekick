@@ -10,6 +10,7 @@ of inactivity so the conversation context never grows large.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections.abc import Iterable
@@ -66,9 +67,15 @@ def collect_text(messages: Iterable[Any]) -> str:
     return text or (result_text or "").strip()
 
 
+def client_key(model: str, system: str) -> str:
+    """Warm clients are keyed by model and system prompt (cleanup and summary share Haiku)."""
+    return f"{model}|{hashlib.sha1(system.encode('utf-8')).hexdigest()[:12]}"
+
+
 @dataclass
 class _Warm:
     client: Any
+    model: str
     system: str
     calls: int = 0
     last_used: float = field(default_factory=time.time)
@@ -95,46 +102,52 @@ class UtilityLLM:
     def set_cli_path(self, cli_path: str | None) -> None:
         self._cli_path = cli_path or None
 
+    @property
+    def warm_keys(self) -> list[str]:
+        return list(self._clients)
+
     async def complete(self, model: str, system: str, prompt: str) -> str:
-        lock = self._locks.setdefault(model, asyncio.Lock())
+        key = client_key(model, system)
+        lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             self.calls_made += 1
             if self._warm_enabled:
                 try:
-                    return await asyncio.wait_for(self._complete_warm(model, system, prompt), self._timeout_s)
+                    return await asyncio.wait_for(self._complete_warm(key, model, system, prompt), self._timeout_s)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("warm claude client for %s failed (%s); retrying one-shot", model, exc)
-                    await self._drop(model)
+                    await self._drop(key)
             return await asyncio.wait_for(self._complete_oneshot(model, system, prompt), self._timeout_s)
 
     async def warm_up(self, targets: Iterable[tuple[str, str]]) -> None:
         for model, system in targets:
-            lock = self._locks.setdefault(model, asyncio.Lock())
+            key = client_key(model, system)
+            lock = self._locks.setdefault(key, asyncio.Lock())
             async with lock:
-                if model in self._clients:
+                if key in self._clients:
                     continue
                 try:
-                    await self._connect(model, system)
+                    await self._connect(key, model, system)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("warm-up for %s failed: %s", model, exc)
 
     async def close(self) -> None:
-        for model in list(self._clients):
-            await self._drop(model)
+        for key in list(self._clients):
+            await self._drop(key)
 
     # --- internals -----------------------------------------------------
-    async def _connect(self, model: str, system: str) -> _Warm:
+    async def _connect(self, key: str, model: str, system: str) -> _Warm:
         from claude_agent_sdk import ClaudeSDKClient
 
         client = ClaudeSDKClient(build_options(model, system, self._cli_path))
         await client.connect()
-        warm = _Warm(client=client, system=system)
-        self._clients[model] = warm
-        log.info("warm claude client ready for %s", model)
+        warm = _Warm(client=client, model=model, system=system)
+        self._clients[key] = warm
+        log.info("warm claude client ready for %s (%s)", model, key)
         return warm
 
-    async def _drop(self, model: str) -> None:
-        warm = self._clients.pop(model, None)
+    async def _drop(self, key: str) -> None:
+        warm = self._clients.pop(key, None)
         if warm is None:
             return
         try:
@@ -142,16 +155,14 @@ class UtilityLLM:
         except Exception:  # noqa: BLE001
             pass
 
-    async def _complete_warm(self, model: str, system: str, prompt: str) -> str:
-        warm = self._clients.get(model)
+    async def _complete_warm(self, key: str, model: str, system: str, prompt: str) -> str:
+        warm = self._clients.get(key)
         stale = warm is not None and (
-            warm.system != system
-            or warm.calls >= self._max_calls
-            or time.time() - warm.last_used > self._idle_s
+            warm.calls >= self._max_calls or time.time() - warm.last_used > self._idle_s
         )
         if warm is None or stale:
-            await self._drop(model)
-            warm = await self._connect(model, system)
+            await self._drop(key)
+            warm = await self._connect(key, model, system)
         await warm.client.query(prompt)
         messages = [m async for m in warm.client.receive_response()]
         warm.calls += 1

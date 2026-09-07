@@ -58,7 +58,9 @@ async def start_session(body: StartBody, services: Services = Depends(get_servic
         save_settings(services.settings_path, services.settings)
     except OSError:
         pass
-    return _session_payload(services)
+    payload = _session_payload(services)
+    # Contract: returns the Session; the wrapper fields are added for convenience.
+    return {**(payload["session"] or {}), **payload}
 
 
 @router.post("/session/stop")

@@ -23,6 +23,8 @@ from .state import AppState
 
 log = logging.getLogger(__name__)
 
+BATTERY_REFRESH_S = 300
+
 
 @dataclass
 class Services:
@@ -53,6 +55,7 @@ class Services:
     listen: Any = None
     gestures: Any = None
     clipboard: Callable[[str], None] | None = None
+    clipboard_get: Callable[[], str | None] | None = None
     _started: bool = False
 
     # --- lifecycle -----------------------------------------------------
@@ -90,6 +93,18 @@ class Services:
             except Exception:  # noqa: BLE001
                 log.exception("failed to stop %s", type(component).__name__)
         self.db.close()
+
+    def restore_audio_sync(self) -> None:
+        """Best-effort audio restore for hard exits (parent watchdog)."""
+        try:
+            if (
+                self.router is not None
+                and self.state.data.audio.routed_to_glasses
+                and self.settings.audio.restore_previous_device
+            ):
+                self.router.restore()
+        except Exception:  # noqa: BLE001
+            log.exception("audio restore failed")
 
     # --- settings ------------------------------------------------------
     def apply_settings(self, new: Settings) -> None:
@@ -130,16 +145,32 @@ def build_core(settings_path: Path, db_path: Path | str, fake: bool) -> Services
     )
 
 
+def _log_task_errors(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        log.error("background task %s failed: %r", task.get_name(), exc)
+
+
+def spawn(coro: Any, name: str) -> asyncio.Task:
+    """create_task with error logging (exceptions in fire-and-forget tasks are otherwise silent)."""
+    task = asyncio.create_task(coro, name=name)
+    task.add_done_callback(_log_task_errors)
+    return task
+
+
 class _Background:
-    """Warm-ups that must not delay startup: whisper model, utility LLM clients, battery."""
+    """Warm-ups and periodic chores that must not delay startup."""
 
     def __init__(self, services: Services) -> None:
         self._s = services
         self._tasks: list[asyncio.Task] = []
 
     def start(self) -> None:
-        self._tasks.append(asyncio.create_task(self._warm_whisper(), name="warm-whisper"))
-        self._tasks.append(asyncio.create_task(self._warm_llm(), name="warm-llm"))
+        self._tasks.append(spawn(self._warm_whisper(), "warm-whisper"))
+        self._tasks.append(spawn(self._warm_llm(), "warm-llm"))
+        self._tasks.append(spawn(self._battery_loop(), "battery"))
 
     async def stop(self) -> None:
         for t in self._tasks:
@@ -171,6 +202,20 @@ class _Background:
         ]
         await llm.warm_up(targets)
 
+    async def _battery_loop(self) -> None:
+        bt = self._s.bluetooth
+        if bt is None or not hasattr(bt, "battery"):
+            return
+        while True:
+            await asyncio.sleep(BATTERY_REFRESH_S)
+            if not self._s.state.glasses_connected:
+                continue
+            try:
+                level = await asyncio.to_thread(bt.battery, self._s.settings.audio.glasses_device_name, 1)
+                self._s.state.update(battery=level)
+            except Exception:  # noqa: BLE001
+                log.debug("battery refresh failed", exc_info=True)
+
 
 class RoutedDeliverer:
     """Decide where a finished transcript goes."""
@@ -201,15 +246,27 @@ class RoutedDeliverer:
         if s.session is not None and s.session.running:
             await s.session.send(text)
             return "embedded"
+        cfg = s.settings.delivery
+        if not cfg.clipboard and not cfg.send_input:
+            raise RuntimeError("Kein Zustellziel: Zwischenablage und SendInput sind beide deaktiviert")
         if s.clipboard is None:
             raise RuntimeError("Keine Zwischenablage verfügbar")
+        previous = None
+        if not cfg.clipboard and s.clipboard_get is not None:
+            try:
+                previous = await asyncio.to_thread(s.clipboard_get)
+            except Exception:  # noqa: BLE001
+                previous = None
         await asyncio.to_thread(s.clipboard, text)
         s.sounds.play("ready_to_paste")
-        if s.settings.delivery.send_input and s.hardware:
+        if cfg.send_input and s.hardware:
             from .delivery.sendinput import paste_and_enter
 
             await asyncio.sleep(0.2)
             await asyncio.to_thread(paste_and_enter)
+            if not cfg.clipboard and previous is not None:
+                await asyncio.sleep(0.5)
+                await asyncio.to_thread(s.clipboard, previous)
             return "sendinput"
         return "clipboard"
 
@@ -222,6 +279,7 @@ def build_services(
     fake=True simulates the glasses (Bluetooth always connected, microphone = default
     device). hardware=False (tests) replaces every Windows backend with a fake.
     """
+    from .audio import portaudio
     from .audio.capture import FakeCapture, SounddeviceCapture, find_input_device
     from .audio.player import Player, SounddeviceOutput, find_output_device
     from .audio.router import AudioRouter
@@ -268,10 +326,17 @@ def build_services(
     router = AudioRouter(audio_backend, state, settings)
 
     def output_device() -> int | None:
+        """WASAPI index of the endpoint to play on: the glasses while routed, otherwise
+        whatever Windows currently uses as default (looked up by name, so device changes
+        after start are honoured), else PortAudio's WASAPI default."""
         if not hardware:
             return None
         try:
-            return find_output_device(router.output_device_name())
+            name = router.output_device_name() or router.current_default_name()
+            idx = find_output_device(name)
+            if idx is not None:
+                return idx
+            return portaudio.wasapi_default_device("output")
         except Exception:  # noqa: BLE001
             return None
 
@@ -326,8 +391,22 @@ def build_services(
         lock = idle = bluetooth = fake_backends
     services.bluetooth = bluetooth
 
+    async def read_battery() -> None:
+        if not hasattr(bluetooth, "battery"):
+            return
+        try:
+            level = await asyncio.to_thread(bluetooth.battery, settings().audio.glasses_device_name, 0)
+            state.update(battery=level)
+        except Exception:  # noqa: BLE001
+            log.debug("battery read failed", exc_info=True)
+
     async def on_transition(name: str) -> None:
         cfg = settings()
+        if name == "glasses_connected" and hardware:
+            # PortAudio only enumerates devices once; the glasses' endpoints appeared just now.
+            if not player.is_playing and not services.listen.busy and portaudio.open_stream_count() == 0:
+                await asyncio.to_thread(portaudio.refresh_devices)
+            spawn(read_battery(), "battery-read")
         if name == "became_present" and cfg.presence.auto_connect:
             try:
                 await asyncio.to_thread(router.route_to_glasses)
@@ -344,12 +423,6 @@ def build_services(
                 )
         if name in ("became_present", "became_absent", "glasses_connected", "glasses_disconnected"):
             state.update(presence_manual=False)
-        if name == "glasses_connected" and hasattr(bluetooth, "battery"):
-            try:
-                level = await asyncio.to_thread(bluetooth.battery, cfg.audio.glasses_device_name)
-                state.update(battery=level)
-            except Exception:  # noqa: BLE001
-                pass
         if name == "glasses_disconnected":
             state.update(battery=None)
 
@@ -359,6 +432,22 @@ def build_services(
     # --- bluetooth doctor -----------------------------------------------------
     doctor = BluetoothDoctor(state)
     services.bluetooth_doctor = doctor
+
+    # --- hooks (created first so the embedded session can route attention through it) ----
+    hooks = HookHandler(
+        state,
+        bus,
+        db,
+        sounds,
+        speaker,
+        summarizer,
+        settings,
+        embedded_waiting=lambda: bool(services.session.pending) if services.session else False,
+        ignore_session_ids=lambda: (
+            {services.session.sdk_session_id} if services.session and services.session.sdk_session_id else set()
+        ),
+    )
+    services.hooks = hooks
 
     # --- embedded session ----------------------------------------------------------
     async def on_done(text: str) -> None:
@@ -378,14 +467,10 @@ def build_services(
             )
         speaker.speak(spoken, kind="needs_input")
 
-    session = EmbeddedSession(settings, state, bus, db, on_done, on_needs_input)
-    services.session = session
-
-    # --- hooks -----------------------------------------------------------------------
-    hooks = HookHandler(
-        state, bus, db, sounds, speaker, summarizer, settings, embedded_waiting=lambda: bool(session.pending)
+    session = EmbeddedSession(
+        settings, state, bus, db, on_done, on_needs_input, attention_refresh=hooks.refresh_state
     )
-    services.hooks = hooks
+    services.session = session
 
     # --- btw -----------------------------------------------------------------------------
     def btw_context() -> tuple[str | None, list[dict[str, str]], str | None]:
@@ -426,17 +511,30 @@ def build_services(
         if not hardware:
             return FakeCapture([])
         eps = router.endpoints()
-        device = find_input_device(eps.capture_hfp.name) if eps.capture_hfp else None
+        device = None
+        if eps.capture_hfp is not None:
+            device = find_input_device(eps.capture_hfp.name)
+        if device is None:
+            bus.publish(
+                "error",
+                {
+                    "module": "audio",
+                    "message": "Mikrofon der Brille (Hands-Free) nicht gefunden, nutze das Standardmikrofon",
+                },
+            )
         return SounddeviceCapture(device)
 
     if hardware:
-        from .delivery.clipboard import set_clipboard_text
+        from .delivery.clipboard import get_clipboard_text, set_clipboard_text
 
         services.clipboard = set_clipboard_text
+        services.clipboard_get = get_clipboard_text
     else:
         from .delivery.clipboard import FakeClipboard
 
-        services.clipboard = FakeClipboard().set
+        fake_clip = FakeClipboard()
+        services.clipboard = fake_clip.set
+        services.clipboard_get = lambda: fake_clip.text
 
     listen = ListenController(
         capture, segmenter, stt, cleaner, sounds, router, state, bus, db, settings, RoutedDeliverer(services)
@@ -496,7 +594,7 @@ class _Shutdown:
     async def stop(self) -> None:
         s = self._s
         try:
-            if s.session is not None and s.session.running:
+            if s.session is not None and s.session.client_active:
                 await s.session.stop()
         except Exception:  # noqa: BLE001
             log.exception("session stop failed")

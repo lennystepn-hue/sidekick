@@ -171,7 +171,8 @@ def build_question_answers(questions: list[dict[str, Any]], text: str) -> dict[s
         if q.get("multiSelect"):
             parts = [p for p in re.split(r"\s*(?:,| und | and |;)\s*", text) if p.strip()]
             picked = [m for m in (match_option(p, labels) for p in parts) if m]
-            answers[question] = picked or [text.strip()]
+            # Claude Code expects one string per question; multi-select labels are comma-joined.
+            answers[question] = ", ".join(picked) if picked else text.strip()
         else:
             answers[question] = match_option(text, labels) or text.strip()
     return answers

@@ -25,10 +25,12 @@ from .stt.whisper import STT
 
 log = logging.getLogger(__name__)
 
+PIPELINE_MODES = ("listening", "btw_listening", "transcribing", "reviewing")
+
 
 class Deliverer(Protocol):
     async def deliver(self, text: str, mode: str) -> str:
-        """Deliver text; returns the target label (embedded|clipboard|answer|btw)."""
+        """Deliver text; returns the target label (embedded|clipboard|sendinput|answer|btw)."""
         ...
 
 
@@ -38,6 +40,7 @@ class ReviewEntry:
     raw: str
     cleaned: str
     mode: str
+    created: float
 
 
 class ListenController:
@@ -87,12 +90,17 @@ class ListenController:
         return self._task is not None and not self._task.done()
 
     async def toggle(self, mode: str = "main") -> bool:
-        """Tap: start recording, or stop the running recording and transcribe. Returns True if now recording."""
+        """Tap: start recording, stop a running recording (and transcribe), or send the
+        transcript that is currently under review. Returns True if now recording."""
         if self.recording:
             self._manual_stop.set()
             return False
         if self.busy:
-            log.info("listen pipeline busy (%s), ignoring toggle", self._state.mode)
+            if self._state.mode == "reviewing" and self._reviews:
+                newest = max(self._reviews, key=lambda k: self._reviews[k].created)
+                self.send_now(newest)
+            else:
+                log.info("listen pipeline busy (%s), ignoring toggle", self._state.mode)
             return False
         self._manual_stop.clear()
         self._cancel.clear()
@@ -131,44 +139,66 @@ class ListenController:
         del self.recent[50:]
         self._bus.publish("transcript", transcript)
 
+    def _fail(self, module: str, message: str, sound: bool = True) -> None:
+        if sound:
+            self._sounds.play("error")
+        self._bus.publish("error", {"module": module, "message": message})
+
     async def _run(self, mode: str) -> None:
+        try:
+            await self._pipeline(mode)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.exception("listen pipeline crashed")
+            self._fail("listen", f"Sprachpipeline abgebrochen: {exc}")
+        finally:
+            if self._state.mode in PIPELINE_MODES:
+                self._state.update(mode="idle")
+
+    async def _pipeline(self, mode: str) -> None:
         listen_mode = "btw_listening" if mode == "btw" else "listening"
+        cfg = self._settings()
+        if cfg.stt.engine != "faster-whisper":
+            self._state.update(mode="idle")
+            self._fail("stt", f"STT-Engine '{cfg.stt.engine}' ist nicht konfiguriert; bitte faster-whisper wählen")
+            return
         self._state.update(mode=listen_mode)
-        self._sounds.play("listening_start")
+        # Play the start tone to the end before the HFP link mutes A2DP.
+        await asyncio.to_thread(self._sounds.play, "listening_start", True)
         audio: np.ndarray | None = None
         try:
             audio = await asyncio.to_thread(self._record)
         except Exception as exc:  # noqa: BLE001
             log.exception("recording failed")
             self._bus.publish("error", {"module": "listen", "message": f"Aufnahme fehlgeschlagen: {exc}"})
-        self._sounds.play("listening_stop")
         if self._router is not None:
             try:
                 await asyncio.to_thread(self._router.ensure_a2dp)
             except Exception as exc:  # noqa: BLE001
                 log.warning("ensure_a2dp failed: %s", exc)
+        self._sounds.play("listening_stop")
         if self._cancel.is_set() or audio is None or len(audio) == 0:
             self._state.update(mode="idle")
             if not self._cancel.is_set():
-                self._sounds.play("error")
-                self._bus.publish("error", {"module": "listen", "message": "Keine Sprache erkannt"})
+                self._fail("listen", "Keine Sprache erkannt")
             return
 
         self._state.update(mode="transcribing")
-        cfg = self._settings()
         try:
             raw = await self._stt.transcribe(audio, cfg.stt.hotwords)
         except Exception as exc:  # noqa: BLE001
             log.exception("transcription failed")
             self._state.update(mode="idle")
-            self._sounds.play("error")
-            self._bus.publish("error", {"module": "stt", "message": f"Transkription fehlgeschlagen: {exc}"})
+            self._fail("stt", f"Transkription fehlgeschlagen: {exc}")
             return
         raw = (raw or "").strip()
         if not raw:
             self._state.update(mode="idle")
-            self._sounds.play("error")
-            self._bus.publish("error", {"module": "stt", "message": "Leeres Transkript"})
+            self._fail("stt", "Leeres Transkript")
+            return
+        if self._cancel.is_set():
+            self._state.update(mode="idle")
             return
 
         cleaned, cleaned_ok = await self._cleaner.clean(raw)
@@ -187,13 +217,18 @@ class ListenController:
             "review_deadline_ts": deadline,
             "ts": now_iso(),
         }
+        if self._cancel.is_set():
+            self._db.add_transcript(tid, raw, cleaned, status="cancelled", target="")
+            self._state.update(mode="idle")
+            self._publish({**transcript, "status": "cancelled"})
+            return
         self._db.add_transcript(tid, raw, cleaned, status="reviewing", target="")
         self._state.update(mode="reviewing")
         self._publish(transcript)
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
-        self._reviews[tid] = ReviewEntry(future=future, raw=raw, cleaned=cleaned, mode=mode)
+        self._reviews[tid] = ReviewEntry(future=future, raw=raw, cleaned=cleaned, mode=mode, created=time.time())
         decision: tuple[str, str | None]
         try:
             if delay > 0:
@@ -206,7 +241,7 @@ class ListenController:
             self._reviews.pop(tid, None)
         self._state.update(mode="idle")
 
-        if decision[0] == "cancel":
+        if decision[0] == "cancel" or self._cancel.is_set():
             self._db.mark_transcript(tid, "cancelled", False)
             self._publish({**transcript, "status": "cancelled"})
             return
@@ -216,8 +251,7 @@ class ListenController:
         except Exception as exc:  # noqa: BLE001
             log.exception("delivery failed")
             self._db.mark_transcript(tid, "failed", False, cleaned=text)
-            self._sounds.play("error")
-            self._bus.publish("error", {"module": "delivery", "message": f"Zustellung fehlgeschlagen: {exc}"})
+            self._fail("delivery", f"Zustellung fehlgeschlagen: {exc}")
             self._publish({**transcript, "cleaned": text, "status": "failed"})
             return
         self._db.mark_transcript(tid, "sent", True, target=target, cleaned=text)

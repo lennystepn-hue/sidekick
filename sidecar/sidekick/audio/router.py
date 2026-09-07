@@ -7,7 +7,13 @@ from collections.abc import Callable
 
 from ..config import Settings
 from ..state import AppState
-from .devices import AudioDevice, AudioDeviceBackend, GlassesEndpoints, pick_glasses_endpoints
+from .devices import (
+    AudioDevice,
+    AudioDeviceBackend,
+    GlassesEndpoints,
+    classify_endpoint,
+    pick_glasses_endpoints,
+)
 
 log = logging.getLogger(__name__)
 
@@ -31,8 +37,6 @@ class AudioRouter:
 
     def devices(self) -> list[AudioDevice]:
         devs = self._backend.list_devices()
-        from .devices import classify_endpoint
-
         for d in devs:
             d.role = classify_endpoint(d.name, self.glasses_name)
         return devs
@@ -44,6 +48,14 @@ class AudioRouter:
         current = self._backend.get_default("render")
         self._state.update_audio(output_device=current.name if current else None)
 
+    def current_default_name(self) -> str | None:
+        """Name of Windows' current default render endpoint (thread-safe, COM per call)."""
+        try:
+            current = self._backend.get_default("render")
+        except Exception:  # noqa: BLE001
+            return None
+        return current.name if current else None
+
     def route_to_glasses(self) -> AudioDevice:
         eps = self.endpoints()
         if eps.render_a2dp is None:
@@ -52,7 +64,13 @@ class AudioRouter:
         if current is not None and current.id == eps.render_a2dp.id:
             self._state.update_audio(output_device=current.name, routed_to_glasses=True)
             return eps.render_a2dp
-        if current is not None and not self._state.data.audio.routed_to_glasses:
+        # Remember only a "real" previous device: when a headset connects Windows often makes
+        # its Hands-Free endpoint the default, and restoring to that later would fail.
+        if (
+            current is not None
+            and not self._state.data.audio.routed_to_glasses
+            and classify_endpoint(current.name, self.glasses_name) == "other"
+        ):
             self._previous = current
         self._backend.set_default(eps.render_a2dp.id)
         self._state.update_audio(
@@ -72,11 +90,13 @@ class AudioRouter:
             return None
         try:
             self._backend.set_default(prev.id)
-        finally:
+        except Exception as exc:
+            log.warning("could not restore previous output %s: %s", prev.name, exc)
             self._previous = None
-            self._state.update_audio(
-                output_device=prev.name, previous_output_device=None, routed_to_glasses=False
-            )
+            self._state.update_audio(previous_output_device=None, routed_to_glasses=False)
+            raise
+        self._previous = None
+        self._state.update_audio(output_device=prev.name, previous_output_device=None, routed_to_glasses=False)
         return prev
 
     def ensure_a2dp(self) -> None:

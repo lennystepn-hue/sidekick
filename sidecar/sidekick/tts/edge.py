@@ -46,7 +46,9 @@ class EdgeEngine:
                 buf.extend(chunk["data"])
         if not buf:
             raise TtsError("edge-tts returned no audio")
-        samples = decode_mp3(bytes(buf))
+        import asyncio
+
+        samples = await asyncio.to_thread(decode_mp3, bytes(buf))
         for start in range(0, len(samples), CHUNK):
             yield samples[start : start + CHUNK].reshape(-1, 1), SAMPLE_RATE, 1
 
