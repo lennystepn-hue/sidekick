@@ -1,0 +1,85 @@
+<script setup lang="ts">
+import type { Settings } from "../../api/types";
+import { useSettingsStore } from "../../stores/settings";
+import { checked, numFrom, strFrom } from "../../utils/form";
+import SettingRow from "./SettingRow.vue";
+
+defineProps<{ settings: Settings }>();
+const st = useSettingsStore();
+</script>
+
+<template>
+  <SettingRow label="Standardmodus" hint="Eingebettet: Session in Sidekick. Extern: Terminal + Hooks." input-id="c-mode">
+    <select
+      id="c-mode"
+      class="select narrow"
+      :value="settings.claude.default_mode"
+      @change="st.set('claude', 'default_mode', strFrom($event) as Settings['claude']['default_mode'])"
+    >
+      <option value="embedded">eingebettet</option>
+      <option value="external">extern</option>
+    </select>
+  </SettingRow>
+  <SettingRow label="Cleanup-Modell" hint="Für die Textbereinigung und Kurzfassungen." input-id="c-clean">
+    <input id="c-clean" class="input mono" :value="settings.claude.cleanup_model" @change="st.set('claude', 'cleanup_model', strFrom($event).trim())" />
+  </SettingRow>
+  <SettingRow label="btw-Modell" hint="Für Nebenfragen, ohne Tool-Zugriff." input-id="c-btw">
+    <input id="c-btw" class="input mono" :value="settings.claude.btw_model" @change="st.set('claude', 'btw_model', strFrom($event).trim())" />
+  </SettingRow>
+  <SettingRow label="Session-Modell" hint="Leer = Claude-Code-Standard." input-id="c-sess">
+    <input
+      id="c-sess"
+      class="input mono"
+      placeholder="Standard"
+      :value="settings.claude.session_model"
+      @change="st.set('claude', 'session_model', strFrom($event).trim())"
+    />
+  </SettingRow>
+  <SettingRow label="CLI-Pfad" hint="Optionaler Pfad zu einer claude.exe. Leer = gebündeltes Binary des SDK." input-id="c-cli">
+    <input
+      id="c-cli"
+      class="input mono"
+      placeholder="gebündelt"
+      :value="settings.claude.cli_path"
+      @change="st.set('claude', 'cli_path', strFrom($event).trim())"
+    />
+  </SettingRow>
+
+  <h3 class="sub">Zustellung ohne eingebettete Session</h3>
+  <SettingRow label="Zwischenablage" hint="Transkript in die Zwischenablage legen und den Ton „bereit zum Einfügen“ spielen.">
+    <label class="check">
+      <input type="checkbox" :checked="settings.delivery.clipboard" @change="st.set('delivery', 'clipboard', checked($event))" />
+      aktiv
+    </label>
+  </SettingRow>
+  <SettingRow label="Direkt ins Terminal tippen" hint="Text per SendInput in das aktive Fenster schreiben. Experimentell.">
+    <label class="check">
+      <input type="checkbox" :checked="settings.delivery.send_input" @change="st.set('delivery', 'send_input', checked($event))" />
+      aktiv
+    </label>
+  </SettingRow>
+
+  <h3 class="sub">Nebenfragen (btw)</h3>
+  <SettingRow label="Kontext-Nachrichten" hint="Wie viele der letzten Nachrichten die Nebenfrage als Kontext bekommt." input-id="c-ctx">
+    <input
+      id="c-ctx"
+      class="input narrow"
+      type="number"
+      min="0"
+      step="1"
+      :value="settings.btw.context_messages"
+      @change="st.set('btw', 'context_messages', Math.round(numFrom($event, 12)))"
+    />
+  </SettingRow>
+</template>
+
+<style scoped>
+.sub {
+  margin: 16px 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+</style>

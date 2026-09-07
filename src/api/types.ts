@@ -31,7 +31,7 @@ export interface BluetoothAdapterState {
   ok: boolean;
   problem_code: number | null;
   name: string | null;
-  instance_id?: string | null;
+  instance_id: string | null;
 }
 
 export interface ModelsState {
@@ -51,8 +51,12 @@ export interface AppState {
   session: Session | null;
   bluetooth_adapter: BluetoothAdapterState;
   models: ModelsState;
-  external_sessions?: number;
+  /** Number of external (hook-driven) terminal sessions the sidecar knows about. */
+  external_sessions: number;
 }
+
+/** Timestamps from the sidecar: ISO strings from the database, unix seconds (float) from live objects. */
+export type Timestamp = string | number;
 
 // ---------- Messages ----------
 
@@ -81,28 +85,36 @@ export type Block = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
 export type MessageRole = "user" | "assistant" | "tool";
 
 export interface Message {
-  id: string;
+  /** SQLite row id (number); the UI compares ids with String() so either form works. */
+  id: number | string;
   session_id: string;
   role: MessageRole;
-  ts: string;
+  ts: Timestamp;
   blocks: Block[];
+  /** Assistant messages: the `message_id` used by the preceding `assistant_delta` events. */
+  stream_id?: string | null;
 }
 
 // ---------- Transcripts / btw ----------
 
 export type TranscriptStatus = "reviewing" | "sent" | "cancelled" | "failed";
 export type TranscriptTarget = "embedded" | "clipboard" | "answer" | "btw";
+export type TranscriptMode = "main" | "btw";
 
 export interface Transcript {
   id: string;
   raw: string;
   cleaned: string;
+  /** False when the cleanup call failed and `cleaned` is just the raw text ("ungefiltert"). */
+  cleaned_ok: boolean;
   sent: boolean;
   status: TranscriptStatus;
-  target: TranscriptTarget | null;
-  /** Epoch seconds (float) or ISO string; see utils/format.ts toMillis(). */
-  review_deadline_ts: number | string | null;
-  ts: string;
+  /** Empty string until the transcript has been delivered. */
+  target: TranscriptTarget | "" | null;
+  mode: TranscriptMode;
+  /** Unix seconds (float); null once the review is over. */
+  review_deadline_ts: number | null;
+  ts: Timestamp;
 }
 
 export interface BtwExchange {
@@ -110,7 +122,7 @@ export interface BtwExchange {
   session_id: string | null;
   question: string;
   answer: string;
-  ts: string;
+  ts: Timestamp;
 }
 
 // ---------- Permissions / questions ----------
@@ -138,8 +150,10 @@ export interface PermissionRequest {
   title: string;
   description: string;
   suggestions: unknown[];
+  /** Only for kind "question" (AskUserQuestion); empty or null otherwise. */
   questions: Question[] | null;
-  ts: string;
+  tool_use_id: string | null;
+  ts: Timestamp;
 }
 
 export interface PermissionResolution {
@@ -195,9 +209,13 @@ export interface ExternalSession {
   session_id: string;
   cwd: string;
   last_event: string;
-  last_ts: string;
-  attention: Attention;
+  last_ts: Timestamp;
+  /** Contract says "none"|"waiting_input"; the current sidecar sends a boolean. Both are accepted. */
+  attention: Attention | boolean;
+  active?: boolean;
 }
+
+export const isWaiting = (a: Attention | boolean | undefined): boolean => a === true || a === "waiting_input";
 
 export type HookScope = "project" | "local" | "user";
 
@@ -208,7 +226,7 @@ export interface HooksStatus {
 }
 
 export interface GestureLogEntry {
-  ts: number | string;
+  ts: Timestamp;
   key: string;
   swallowed: boolean;
   gesture: string | null;
@@ -366,6 +384,8 @@ export type WsEvent =
   | WsBase<"btw_answer", BtwExchange>
   | WsBase<"spoken", SpokenEvent>
   | WsBase<"hook_event", HookEvent>
-  | WsBase<"error", ErrorEvent>;
+  | WsBase<"error", ErrorEvent>
+  /** Not in the contract table, but the sidecar broadcasts the full settings after every PUT /settings. */
+  | WsBase<"settings", Settings>;
 
 export type WsEventType = WsEvent["type"];
