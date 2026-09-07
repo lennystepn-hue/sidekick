@@ -63,9 +63,10 @@ class Summarizer:
         cfg = self._settings()
         if not cfg.tts.summarize_before_speaking or (len(text) < 200 and "```" not in text):
             return first_sentences(text, 400)
+        prompt = f"Letzte Antwort von Claude Code:\n<<<\n{text[:12000]}\n>>>\n\nZusammenfassung zum Vorlesen:"
         try:
             out = await asyncio.wait_for(
-                self._llm.complete(cfg.claude.summary_model, self.system_prompt, text[:12000]), self._timeout
+                self._llm.complete(cfg.claude.summary_model, self.system_prompt, prompt), self._timeout
             )
             out = strip_markdown(out)
             if out:

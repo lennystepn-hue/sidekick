@@ -41,8 +41,9 @@ class Cleaner:
         cfg = self._settings()
         if not cfg.stt.cleanup_enabled:
             return raw, False
+        prompt = f"Transkript:\n<<<\n{raw}\n>>>\n\nBereinigter Text:"
         try:
-            out = await asyncio.wait_for(self._llm.complete(cfg.claude.cleanup_model, self.system_prompt, raw), self._timeout)
+            out = await asyncio.wait_for(self._llm.complete(cfg.claude.cleanup_model, self.system_prompt, prompt), self._timeout)
         except Exception as exc:  # noqa: BLE001
             log.warning("cleanup failed, using raw transcript: %s", exc)
             return raw, False
