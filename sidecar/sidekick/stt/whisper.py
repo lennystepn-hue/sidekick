@@ -22,7 +22,9 @@ class STT(Protocol):
 
 
 class WhisperSTT:
-    def __init__(self, settings: Callable[[], Settings], models_dir: Path, state: AppState | None = None) -> None:
+    def __init__(
+        self, settings: Callable[[], Settings], models_dir: Path, state: AppState | None = None
+    ) -> None:
         self._settings = settings
         self._models_dir = models_dir
         self._state = state

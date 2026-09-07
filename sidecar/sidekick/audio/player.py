@@ -97,7 +97,10 @@ def load_wav(path: Path) -> PcmChunk:
 
 
 def pcm16_to_float(data: bytes, channels: int) -> np.ndarray:
-    arr = np.frombuffer(data[: len(data) - len(data) % (2 * channels)], dtype=np.int16).astype(np.float32) / 32768.0
+    arr = (
+        np.frombuffer(data[: len(data) - len(data) % (2 * channels)], dtype=np.int16).astype(np.float32)
+        / 32768.0
+    )
     return arr.reshape(-1, channels)
 
 
@@ -168,7 +171,9 @@ class Player:
     def play_wav(self, path: Path, block: bool = False, volume: float | None = None) -> threading.Event:
         return self.play_chunks([load_wav(path)], block=block, volume=volume)
 
-    def play_chunks(self, chunks: Iterable[PcmChunk], block: bool = False, volume: float | None = None) -> threading.Event:
+    def play_chunks(
+        self, chunks: Iterable[PcmChunk], block: bool = False, volume: float | None = None
+    ) -> threading.Event:
         finished = threading.Event()
         self._idle.clear()
         self._jobs.put((chunks, finished, volume))

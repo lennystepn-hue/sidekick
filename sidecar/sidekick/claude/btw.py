@@ -18,7 +18,18 @@ from .utility import LLM, load_prompt
 
 log = logging.getLogger(__name__)
 
-SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "target", "dist", "build", "__pycache__", ".idea", ".vscode"}
+SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "target",
+    "dist",
+    "build",
+    "__pycache__",
+    ".idea",
+    ".vscode",
+}
 
 
 def project_file_list(cwd: str | Path | None, limit: int = 300) -> list[str]:
@@ -30,7 +41,11 @@ def project_file_list(cwd: str | Path | None, limit: int = 300) -> list[str]:
     if (root / ".git").exists():
         try:
             out = subprocess.run(
-                ["git", "ls-files"], cwd=str(root), capture_output=True, text=True, timeout=10,
+                ["git", "ls-files"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=10,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if out.returncode == 0:
@@ -72,7 +87,9 @@ class BtwAssistant:
         self._context = context
         self.system_prompt = load_prompt("btw")
 
-    def build_prompt(self, question: str, cwd: str | None, messages: list[dict[str, str]], files: list[str]) -> str:
+    def build_prompt(
+        self, question: str, cwd: str | None, messages: list[dict[str, str]], files: list[str]
+    ) -> str:
         parts: list[str] = []
         parts.append(f"Projekt: {cwd or 'unbekannt'}")
         if files:
@@ -97,7 +114,9 @@ class BtwAssistant:
         files = await asyncio.to_thread(project_file_list, cwd, cfg.btw.file_list_limit)
         prompt = self.build_prompt(question, cwd, messages, files)
         try:
-            answer = await asyncio.wait_for(self._llm.complete(cfg.claude.btw_model, self.system_prompt, prompt), 60)
+            answer = await asyncio.wait_for(
+                self._llm.complete(cfg.claude.btw_model, self.system_prompt, prompt), 60
+            )
         except Exception as exc:  # noqa: BLE001
             log.exception("btw failed")
             answer = f"Das konnte ich gerade nicht beantworten: {exc}"

@@ -95,7 +95,9 @@ class PycawBackend:
         from pycaw.constants import CLSID_MMDeviceEnumerator
 
         comtypes.CoInitialize()
-        return comtypes.CoCreateInstance(CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, comtypes.CLSCTX_INPROC_SERVER)
+        return comtypes.CoCreateInstance(
+            CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, comtypes.CLSCTX_INPROC_SERVER
+        )
 
     @staticmethod
     def _friendly_name(device) -> str:
@@ -123,7 +125,10 @@ class PycawBackend:
         with self._lock:
             enum = self._enumerator()
             out: list[AudioDevice] = []
-            for flow_name, flow in (("render", EDataFlow.eRender.value), ("capture", EDataFlow.eCapture.value)):
+            for flow_name, flow in (
+                ("render", EDataFlow.eRender.value),
+                ("capture", EDataFlow.eCapture.value),
+            ):
                 default_id = None
                 try:
                     default_id = enum.GetDefaultAudioEndpoint(flow, ERole.eMultimedia.value).GetId()

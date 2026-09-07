@@ -42,7 +42,9 @@ async def hook_root(request: Request, services: Services = Depends(get_services)
 
 
 @router.post("/hook/{event}")
-async def hook_event(event: str, request: Request, services: Services = Depends(get_services)) -> dict[str, Any]:
+async def hook_event(
+    event: str, request: Request, services: Services = Depends(get_services)
+) -> dict[str, Any]:
     payload = await _payload(request)
     asyncio.create_task(services.hooks.handle(event, payload))
     return {}
@@ -75,7 +77,9 @@ def _validate(body: InstallBody) -> tuple[str | None, str]:
 
 
 @router.get("/hooks/status")
-async def hooks_status(path: str | None = None, scope: str = "project", services: Services = Depends(get_services)) -> dict[str, Any]:
+async def hooks_status(
+    path: str | None = None, scope: str = "project", services: Services = Depends(get_services)
+) -> dict[str, Any]:
     project, scope = _validate(InstallBody(path=path, scope=scope))
     return installer.status(project, scope)
 

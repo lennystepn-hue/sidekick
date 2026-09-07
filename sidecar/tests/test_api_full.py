@@ -31,10 +31,23 @@ def test_full_app_smoke(tmp_path):
         assert c.get("/transcripts").json() == []
         assert c.get("/btw").json() == []
         assert c.get("/gestures/log").json() == []
-        assert c.get("/hooks/snippet").json()["hooks"]["Stop"][0]["hooks"][0]["url"].startswith("http://127.0.0.1:")
-        assert c.get("/hooks/status", params={"path": str(tmp_path), "scope": "project"}).json()["installed"] is False
-        assert c.post("/hooks/install", json={"path": str(tmp_path), "scope": "local"}).json()["installed"] is True
-        assert c.post("/hooks/uninstall", json={"path": str(tmp_path), "scope": "local"}).json()["installed"] is False
+        assert (
+            c.get("/hooks/snippet")
+            .json()["hooks"]["Stop"][0]["hooks"][0]["url"]
+            .startswith("http://127.0.0.1:")
+        )
+        assert (
+            c.get("/hooks/status", params={"path": str(tmp_path), "scope": "project"}).json()["installed"]
+            is False
+        )
+        assert (
+            c.post("/hooks/install", json={"path": str(tmp_path), "scope": "local"}).json()["installed"]
+            is True
+        )
+        assert (
+            c.post("/hooks/uninstall", json={"path": str(tmp_path), "scope": "local"}).json()["installed"]
+            is False
+        )
         assert c.post("/hook/SessionStart", json={"session_id": "x", "cwd": str(tmp_path)}).status_code == 200
         assert c.post("/hook", content=b"not json").status_code == 200
         assert c.post("/tts/speak", json={"text": ""}).status_code == 422

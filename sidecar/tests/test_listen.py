@@ -29,7 +29,9 @@ class FakeDeliverer:
         return "clipboard"
 
 
-def _controller(tmp_path, probs, settings=None, deliverer=None, stt_text="fast api ist gut", max_duration_s=60.0):
+def _controller(
+    tmp_path, probs, settings=None, deliverer=None, stt_text="fast api ist gut", max_duration_s=60.0
+):
     bus = EventBus()
     bus.bind(asyncio.get_running_loop())
     state = AppState(bus)
@@ -42,7 +44,10 @@ def _controller(tmp_path, probs, settings=None, deliverer=None, stt_text="fast a
         segmenter_factory=lambda: Segmenter(
             FakeVad(probs),
             SegmenterConfig(
-                silence_timeout_s=0.2, min_speech_s=0.1, no_speech_timeout_s=0.5, max_duration_s=max_duration_s
+                silence_timeout_s=0.2,
+                min_speech_s=0.1,
+                no_speech_timeout_s=0.5,
+                max_duration_s=max_duration_s,
             ),
         ),
         stt=FakeSTT(stt_text),

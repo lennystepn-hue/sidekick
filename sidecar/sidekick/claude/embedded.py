@@ -79,7 +79,11 @@ def blocks_from_content(content: Any) -> list[dict[str, Any]]:
         elif isinstance(block, ToolResultBlock):
             content_value = block.content
             if isinstance(content_value, list):
-                texts = [c.get("text", "") for c in content_value if isinstance(c, dict) and c.get("type") == "text"]
+                texts = [
+                    c.get("text", "")
+                    for c in content_value
+                    if isinstance(c, dict) and c.get("type") == "text"
+                ]
                 content_value = "\n".join(texts) if texts else str(content_value)
             out.append(
                 {
@@ -159,7 +163,12 @@ class EmbeddedSession:
         self._client = self._client_factory(options)
         await self._client.connect()
         info = SessionInfo(
-            id=self.session_id, cwd=cwd, mode="embedded", status="idle", model=model or "", started_at=now_iso()
+            id=self.session_id,
+            cwd=cwd,
+            mode="embedded",
+            status="idle",
+            model=model or "",
+            started_at=now_iso(),
         )
         self._db.add_session(self.session_id, cwd, "embedded")
         self._state.update(session=info, attention="none")
@@ -216,7 +225,9 @@ class EmbeddedSession:
             tool_name=tool_name,
             input=tool_input or {},
             title=str(getattr(context, "title", None) or getattr(context, "display_name", None) or tool_name),
-            description=str(getattr(context, "description", None) or getattr(context, "decision_reason", None) or ""),
+            description=str(
+                getattr(context, "description", None) or getattr(context, "decision_reason", None) or ""
+            ),
             suggestions=list(getattr(context, "suggestions", None) or []),
             questions=list((tool_input or {}).get("questions", [])) if kind == "question" else [],
             tool_use_id=getattr(context, "tool_use_id", None),
@@ -246,11 +257,17 @@ class EmbeddedSession:
         updated_input = dict(tool_input or {})
         if kind == "question" and answers:
             updated_input["answers"] = answers
-        updated_permissions = pending.suggestions if decision == "allow_always" and pending.suggestions else None
+        updated_permissions = (
+            pending.suggestions if decision == "allow_always" and pending.suggestions else None
+        )
         return PermissionResultAllow(updated_input=updated_input, updated_permissions=updated_permissions)
 
     def resolve_permission(
-        self, pending_id: str, decision: str, answers: dict[str, Any] | None = None, message: str | None = None
+        self,
+        pending_id: str,
+        decision: str,
+        answers: dict[str, Any] | None = None,
+        message: str | None = None,
     ) -> bool:
         if decision not in ("allow", "deny", "allow_always"):
             raise ValueError("decision must be allow, deny or allow_always")
@@ -295,10 +312,17 @@ class EmbeddedSession:
                 if delta.get("type") == "text_delta" and delta.get("text"):
                     self._bus.publish(
                         "assistant_delta",
-                        {"session_id": sid, "message_id": self._stream_message_id or "stream", "text": delta["text"]},
+                        {
+                            "session_id": sid,
+                            "message_id": self._stream_message_id or "stream",
+                            "text": delta["text"],
+                        },
                     )
             elif etype == "message_stop":
-                self._bus.publish("assistant_stream_end", {"session_id": sid, "message_id": self._stream_message_id or "stream"})
+                self._bus.publish(
+                    "assistant_stream_end",
+                    {"session_id": sid, "message_id": self._stream_message_id or "stream"},
+                )
                 self._stream_message_id = None
             return
         if isinstance(message, SystemMessage):
@@ -306,7 +330,11 @@ class EmbeddedSession:
                 self.sdk_session_id = (message.data or {}).get("session_id")
             return
         if isinstance(message, AssistantMessage):
-            blocks = [b for b in blocks_from_content(message.content) if not (b["type"] == "thinking" and not b.get("text"))]
+            blocks = [
+                b
+                for b in blocks_from_content(message.content)
+                if not (b["type"] == "thinking" and not b.get("text"))
+            ]
             if not blocks:
                 return
             text = "\n".join(b["text"] for b in blocks if b["type"] == "text").strip()
@@ -329,7 +357,9 @@ class EmbeddedSession:
             self._state.update_session(status="idle")
             final = self._last_assistant_text or (message.result or "")
             if message.is_error:
-                self._bus.publish("error", {"module": "session", "message": message.result or message.subtype})
+                self._bus.publish(
+                    "error", {"module": "session", "message": message.result or message.subtype}
+                )
             if self._on_done is not None:
                 try:
                     result = self._on_done(final)

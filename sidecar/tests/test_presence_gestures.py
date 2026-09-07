@@ -118,7 +118,9 @@ async def test_controller_dispatches_actions_and_logs():
     async def repeat() -> None:
         calls.append("repeat")
 
-    ctl = GestureController(FakeMediaKeyHook, lambda: Settings(), state, bus, {"toggle_listen": toggle, "repeat_last": repeat})
+    ctl = GestureController(
+        FakeMediaKeyHook, lambda: Settings(), state, bus, {"toggle_listen": toggle, "repeat_last": repeat}
+    )
     ctl.start()
     hook: FakeMediaKeyHook = ctl.hook  # type: ignore[assignment]
     assert hook.press("play_pause") is False  # glasses not connected -> not swallowed

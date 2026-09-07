@@ -20,7 +20,9 @@ def _text_of(content: Any) -> str:
 
 
 def _has_tool_result(content: Any) -> bool:
-    return isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+    )
 
 
 def _entries(path: Path, max_lines: int = 4000) -> list[dict[str, Any]]:

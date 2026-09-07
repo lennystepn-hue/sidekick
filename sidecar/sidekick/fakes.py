@@ -39,10 +39,14 @@ class FakeOutput:
 class FakeAudioBackend:
     def __init__(self, devices: list[AudioDevice] | None = None) -> None:
         self.devices = devices or [
-            AudioDevice(id="spk", name="Lautsprecher (Realtek High Definition Audio)", flow="render", is_default=True),
+            AudioDevice(
+                id="spk", name="Lautsprecher (Realtek High Definition Audio)", flow="render", is_default=True
+            ),
             AudioDevice(id="rb-a2dp", name="Kopfhörer (Ray-Ban Meta Stereo)", flow="render"),
             AudioDevice(id="rb-hfp", name="Headset (Ray-Ban Meta Hands-Free AG Audio)", flow="render"),
-            AudioDevice(id="mic", name="Mikrofon (Realtek High Definition Audio)", flow="capture", is_default=True),
+            AudioDevice(
+                id="mic", name="Mikrofon (Realtek High Definition Audio)", flow="capture", is_default=True
+            ),
             AudioDevice(id="rb-mic", name="Headset (Ray-Ban Meta Hands-Free AG Audio)", flow="capture"),
         ]
         self.set_calls: list[str] = []

@@ -139,7 +139,9 @@ class Speaker:
                 self._player.stop()
                 errors.append(f"{name}: {exc}")
                 log.warning("tts engine %s failed: %s", name, exc)
-        self._bus.publish("error", {"module": "tts", "message": "Sprachausgabe fehlgeschlagen: " + "; ".join(errors)})
+        self._bus.publish(
+            "error", {"module": "tts", "message": "Sprachausgabe fehlgeschlagen: " + "; ".join(errors)}
+        )
 
 
 class FakeEngine:

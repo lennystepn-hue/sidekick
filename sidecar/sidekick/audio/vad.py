@@ -32,7 +32,9 @@ class SileroVad:
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
         opts.log_severity_level = 3
-        self._session = ort.InferenceSession(str(model_path), sess_options=opts, providers=["CPUExecutionProvider"])
+        self._session = ort.InferenceSession(
+            str(model_path), sess_options=opts, providers=["CPUExecutionProvider"]
+        )
         names = {i.name for i in self._session.get_inputs()}
         self._v5 = "state" in names
         self._context = np.zeros((1, 64), dtype=np.float32)

@@ -121,7 +121,9 @@ class WinMediaKeyHook:
     def _run(self) -> None:
         self._thread_id = _kernel32.GetCurrentThreadId()
         self._proc = HOOKPROC(self._callback)
-        self._hook = _user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, _kernel32.GetModuleHandleW(None), 0)
+        self._hook = _user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, self._proc, _kernel32.GetModuleHandleW(None), 0
+        )
         if not self._hook:
             log.error("SetWindowsHookEx failed: %s", ctypes.get_last_error())
             self._ready.set()

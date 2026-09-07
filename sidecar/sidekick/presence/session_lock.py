@@ -47,8 +47,18 @@ if sys.platform == "win32":
     _user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
     _user32.CreateWindowExW.restype = wintypes.HWND
     _user32.CreateWindowExW.argtypes = [
-        wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_int, ctypes.c_int,
-        ctypes.c_int, ctypes.c_int, wintypes.HWND, wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        wintypes.HMENU,
+        wintypes.HINSTANCE,
+        wintypes.LPVOID,
     ]
     _user32.DestroyWindow.argtypes = [wintypes.HWND]
     _user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
@@ -125,9 +135,13 @@ class WinSessionLockBackend:
             err = ctypes.get_last_error()
             if err not in (0, 1410):  # ERROR_CLASS_ALREADY_EXISTS
                 log.warning("RegisterClassW failed: %s", err)
-        self._hwnd = _user32.CreateWindowExW(0, wc.lpszClassName, "Sidekick", 0, 0, 0, 0, 0, None, None, hinst, None)
+        self._hwnd = _user32.CreateWindowExW(
+            0, wc.lpszClassName, "Sidekick", 0, 0, 0, 0, 0, None, None, hinst, None
+        )
         if not self._hwnd:
-            log.warning("could not create hidden window for session notifications: %s", ctypes.get_last_error())
+            log.warning(
+                "could not create hidden window for session notifications: %s", ctypes.get_last_error()
+            )
             self._ready.set()
             return
         if not _wtsapi32.WTSRegisterSessionNotification(self._hwnd, NOTIFY_FOR_THIS_SESSION):

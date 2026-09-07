@@ -77,7 +77,10 @@ def _run_ps(script: str, timeout: float = 30) -> str:
         return ""
     out = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return out.stdout
 
@@ -108,8 +111,14 @@ async def reset_adapter(instance_id: str) -> tuple[bool, str]:
     if health.ok:
         return True, "Adapter neu gestartet und wieder in Ordnung"
     if out and out != "0":
-        return False, f"pnputil Exit-Code {out}. Wenn das nicht hilft: Rechner vollständig herunterfahren, 30 Sekunden warten, einschalten."
-    return False, f"Adapter meldet weiterhin: {health.message}. Rechner vollständig herunterfahren, 30 Sekunden warten, einschalten."
+        return (
+            False,
+            f"pnputil Exit-Code {out}. Wenn das nicht hilft: Rechner vollständig herunterfahren, 30 Sekunden warten, einschalten.",
+        )
+    return (
+        False,
+        f"Adapter meldet weiterhin: {health.message}. Rechner vollständig herunterfahren, 30 Sekunden warten, einschalten.",
+    )
 
 
 class BluetoothDoctor:
@@ -132,7 +141,10 @@ class BluetoothDoctor:
         health = await adapter_health()
         self.last = health
         self._state.set_adapter(
-            ok=health.ok, problem_code=health.problem_code, name=health.adapter_name, instance_id=health.instance_id
+            ok=health.ok,
+            problem_code=health.problem_code,
+            name=health.adapter_name,
+            instance_id=health.instance_id,
         )
         return health
 

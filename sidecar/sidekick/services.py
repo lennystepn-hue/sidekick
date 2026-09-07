@@ -71,7 +71,9 @@ class Services:
                     await result
             except Exception:  # noqa: BLE001
                 log.exception("failed to start %s", type(component).__name__)
-                self.bus.publish("error", {"module": type(component).__name__, "message": "Start fehlgeschlagen"})
+                self.bus.publish(
+                    "error", {"module": type(component).__name__, "message": "Start fehlgeschlagen"}
+                )
 
     async def stop(self) -> None:
         if not self._started:
@@ -154,14 +156,19 @@ class _Background:
             await stt.preload()
         except Exception as exc:  # noqa: BLE001
             log.warning("whisper preload failed: %s", exc)
-            self._s.bus.publish("error", {"module": "stt", "message": f"Whisper-Modell konnte nicht geladen werden: {exc}"})
+            self._s.bus.publish(
+                "error", {"module": "stt", "message": f"Whisper-Modell konnte nicht geladen werden: {exc}"}
+            )
 
     async def _warm_llm(self) -> None:
         llm = self._s.llm
         if llm is None or not hasattr(llm, "warm_up"):
             return
         cfg = self._s.settings.claude
-        targets = [(cfg.cleanup_model, self._s.cleaner.system_prompt), (cfg.summary_model, self._s.summarizer.system_prompt)]
+        targets = [
+            (cfg.cleanup_model, self._s.cleaner.system_prompt),
+            (cfg.summary_model, self._s.summarizer.system_prompt),
+        ]
         await llm.warm_up(targets)
 
 
@@ -186,7 +193,9 @@ class RoutedDeliverer:
                 s.session.resolve_permission(pending.id, "allow", answers=answers)
             else:
                 decision = parse_decision(text) or "deny"
-                s.session.resolve_permission(pending.id, decision, message=None if decision != "deny" else text)
+                s.session.resolve_permission(
+                    pending.id, decision, message=None if decision != "deny" else text
+                )
             s.sounds.play("ready_to_paste")
             return "answer"
         if s.session is not None and s.session.running:
@@ -205,7 +214,9 @@ class RoutedDeliverer:
         return "clipboard"
 
 
-def build_services(settings_path: Path, db_path: Path | str, fake: bool = False, hardware: bool | None = None) -> Services:
+def build_services(
+    settings_path: Path, db_path: Path | str, fake: bool = False, hardware: bool | None = None
+) -> Services:
     """Build the full container.
 
     fake=True simulates the glasses (Bluetooth always connected, microphone = default
@@ -264,7 +275,9 @@ def build_services(settings_path: Path, db_path: Path | str, fake: bool = False,
         except Exception:  # noqa: BLE001
             return None
 
-    player = Player(output_backend, device_resolver=output_device, volume_resolver=lambda: settings().audio.tone_volume)
+    player = Player(
+        output_backend, device_resolver=output_device, volume_resolver=lambda: settings().audio.tone_volume
+    )
     sounds = Sounds(player)
     services.router, services.player, services.sounds = router, player, sounds
 
@@ -326,7 +339,9 @@ def build_services(settings_path: Path, db_path: Path | str, fake: bool = False,
             try:
                 await asyncio.to_thread(router.restore)
             except Exception as exc:  # noqa: BLE001
-                bus.publish("error", {"module": "audio", "message": f"Audio zurücksetzen fehlgeschlagen: {exc}"})
+                bus.publish(
+                    "error", {"module": "audio", "message": f"Audio zurücksetzen fehlgeschlagen: {exc}"}
+                )
         if name in ("became_present", "became_absent", "glasses_connected", "glasses_disconnected"):
             state.update(presence_manual=False)
         if name == "glasses_connected" and hasattr(bluetooth, "battery"):
@@ -358,14 +373,18 @@ def build_services(settings_path: Path, db_path: Path | str, fake: bool = False,
             options = [str(o.get("label", "")) for o in q.get("options", []) if isinstance(o, dict)]
             spoken = summarizer.format_needs_input(str(q.get("question", "")), options)
         else:
-            spoken = summarizer.format_permission(pending.tool_name, pending.input, pending.description or None)
+            spoken = summarizer.format_permission(
+                pending.tool_name, pending.input, pending.description or None
+            )
         speaker.speak(spoken, kind="needs_input")
 
     session = EmbeddedSession(settings, state, bus, db, on_done, on_needs_input)
     services.session = session
 
     # --- hooks -----------------------------------------------------------------------
-    hooks = HookHandler(state, bus, db, sounds, speaker, summarizer, settings, embedded_waiting=lambda: bool(session.pending))
+    hooks = HookHandler(
+        state, bus, db, sounds, speaker, summarizer, settings, embedded_waiting=lambda: bool(session.pending)
+    )
     services.hooks = hooks
 
     # --- btw -----------------------------------------------------------------------------
@@ -419,7 +438,9 @@ def build_services(settings_path: Path, db_path: Path | str, fake: bool = False,
 
         services.clipboard = FakeClipboard().set
 
-    listen = ListenController(capture, segmenter, stt, cleaner, sounds, router, state, bus, db, settings, RoutedDeliverer(services))
+    listen = ListenController(
+        capture, segmenter, stt, cleaner, sounds, router, state, bus, db, settings, RoutedDeliverer(services)
+    )
     services.listen = listen
 
     # --- gestures ----------------------------------------------------------------
@@ -446,8 +467,16 @@ def build_services(settings_path: Path, db_path: Path | str, fake: bool = False,
     else:
         hook_factory = FakeMediaKeyHook
     gestures = GestureController(
-        hook_factory, settings, state, bus,
-        {"toggle_listen": act_toggle_listen, "repeat_last": act_repeat, "btw": act_btw, "stop_speaking": act_stop},
+        hook_factory,
+        settings,
+        state,
+        bus,
+        {
+            "toggle_listen": act_toggle_listen,
+            "repeat_last": act_repeat,
+            "btw": act_btw,
+            "stop_speaking": act_stop,
+        },
     )
     services.gestures = gestures
 
@@ -472,7 +501,11 @@ class _Shutdown:
         except Exception:  # noqa: BLE001
             log.exception("session stop failed")
         try:
-            if s.router is not None and s.state.data.audio.routed_to_glasses and s.settings.audio.restore_previous_device:
+            if (
+                s.router is not None
+                and s.state.data.audio.routed_to_glasses
+                and s.settings.audio.restore_previous_device
+            ):
                 await asyncio.to_thread(s.router.restore)
         except Exception:  # noqa: BLE001
             log.exception("audio restore failed")

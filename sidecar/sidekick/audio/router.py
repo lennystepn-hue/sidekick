@@ -17,7 +17,9 @@ class AudioRouteError(RuntimeError):
 
 
 class AudioRouter:
-    def __init__(self, backend: AudioDeviceBackend, state: AppState, settings: Callable[[], Settings]) -> None:
+    def __init__(
+        self, backend: AudioDeviceBackend, state: AppState, settings: Callable[[], Settings]
+    ) -> None:
         self._backend = backend
         self._state = state
         self._settings = settings
@@ -72,7 +74,9 @@ class AudioRouter:
             self._backend.set_default(prev.id)
         finally:
             self._previous = None
-            self._state.update_audio(output_device=prev.name, previous_output_device=None, routed_to_glasses=False)
+            self._state.update_audio(
+                output_device=prev.name, previous_output_device=None, routed_to_glasses=False
+            )
         return prev
 
     def ensure_a2dp(self) -> None:

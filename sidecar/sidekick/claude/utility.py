@@ -144,13 +144,10 @@ class UtilityLLM:
 
     async def _complete_warm(self, model: str, system: str, prompt: str) -> str:
         warm = self._clients.get(model)
-        stale = (
-            warm is not None
-            and (
-                warm.system != system
-                or warm.calls >= self._max_calls
-                or time.time() - warm.last_used > self._idle_s
-            )
+        stale = warm is not None and (
+            warm.system != system
+            or warm.calls >= self._max_calls
+            or time.time() - warm.last_used > self._idle_s
         )
         if warm is None or stale:
             await self._drop(model)
@@ -164,7 +161,9 @@ class UtilityLLM:
     async def _complete_oneshot(self, model: str, system: str, prompt: str) -> str:
         from claude_agent_sdk import query
 
-        messages = [m async for m in query(prompt=prompt, options=build_options(model, system, self._cli_path))]
+        messages = [
+            m async for m in query(prompt=prompt, options=build_options(model, system, self._cli_path))
+        ]
         return collect_text(messages)
 
 

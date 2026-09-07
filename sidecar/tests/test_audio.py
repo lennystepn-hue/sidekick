@@ -116,7 +116,9 @@ def test_router_route_and_restore():
 
 
 def test_router_without_glasses_raises():
-    router, _ = _router(FakeAudioBackend(devices=[AudioDevice(id="spk", name="Speakers", flow="render", is_default=True)]))
+    router, _ = _router(
+        FakeAudioBackend(devices=[AudioDevice(id="spk", name="Speakers", flow="render", is_default=True)])
+    )
     with pytest.raises(AudioRouteError):
         router.route_to_glasses()
 

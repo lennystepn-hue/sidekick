@@ -84,7 +84,9 @@ class Summarizer:
         return f"Claude fragt: {q}"
 
     @staticmethod
-    def format_permission(tool_name: str, tool_input: dict[str, Any] | None, description: str | None = None) -> str:
+    def format_permission(
+        tool_name: str, tool_input: dict[str, Any] | None, description: str | None = None
+    ) -> str:
         tool_input = tool_input or {}
         detail = ""
         if tool_name == "Bash":

@@ -55,11 +55,24 @@ def test_match_option():
 
 def test_build_question_answers():
     questions = [
-        {"question": "Welches Format?", "header": "Format", "options": [{"label": "Kurz"}, {"label": "Ausführlich"}], "multiSelect": False},
+        {
+            "question": "Welches Format?",
+            "header": "Format",
+            "options": [{"label": "Kurz"}, {"label": "Ausführlich"}],
+            "multiSelect": False,
+        },
     ]
     assert build_question_answers(questions, "ausführlich bitte") == {"Welches Format?": "Ausführlich"}
-    assert build_question_answers(questions, "mach was du willst") == {"Welches Format?": "mach was du willst"}
-    multi = [{"question": "Welche Teile?", "options": [{"label": "Tests"}, {"label": "Docs"}, {"label": "CI"}], "multiSelect": True}]
+    assert build_question_answers(questions, "mach was du willst") == {
+        "Welches Format?": "mach was du willst"
+    }
+    multi = [
+        {
+            "question": "Welche Teile?",
+            "options": [{"label": "Tests"}, {"label": "Docs"}, {"label": "CI"}],
+            "multiSelect": True,
+        }
+    ]
     assert build_question_answers(multi, "tests und docs") == {"Welche Teile?": ["Tests", "Docs"]}
 
 
@@ -111,7 +124,13 @@ async def _session(tmp_path):
         needs.append(p.kind)
 
     session = EmbeddedSession(
-        lambda: Settings(), state, bus, Database(tmp_path / "t.db"), on_done, on_needs_input, client_factory=FakeClient
+        lambda: Settings(),
+        state,
+        bus,
+        Database(tmp_path / "t.db"),
+        on_done,
+        on_needs_input,
+        client_factory=FakeClient,
     )
     return session, bus, state, done, needs
 
@@ -133,12 +152,37 @@ async def test_session_streams_messages_and_calls_on_done(tmp_path):
     assert client.options.cwd == str(tmp_path) and client.options.permission_mode == "default"
     await session.send("Sag OK")
     assert client.queries == ["Sag OK"] and state.session.status == "running"
-    await client.queue.put(StreamEvent(uuid="u", session_id="s", event={"type": "message_start", "message": {"id": "m1"}}))
-    await client.queue.put(StreamEvent(uuid="u", session_id="s", event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hal"}}))
-    await client.queue.put(AssistantMessage(content=[TextBlock(text="Hallo"), ToolUseBlock(id="t1", name="Bash", input={"command": "ls"})], model="m"))
-    await client.queue.put(UserMessage(content=[ToolResultBlock(tool_use_id="t1", content="file.txt", is_error=False)]))
+    await client.queue.put(
+        StreamEvent(uuid="u", session_id="s", event={"type": "message_start", "message": {"id": "m1"}})
+    )
+    await client.queue.put(
+        StreamEvent(
+            uuid="u",
+            session_id="s",
+            event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hal"}},
+        )
+    )
+    await client.queue.put(
+        AssistantMessage(
+            content=[TextBlock(text="Hallo"), ToolUseBlock(id="t1", name="Bash", input={"command": "ls"})],
+            model="m",
+        )
+    )
+    await client.queue.put(
+        UserMessage(content=[ToolResultBlock(tool_use_id="t1", content="file.txt", is_error=False)])
+    )
     await client.queue.put(AssistantMessage(content=[TextBlock(text="Fertig, eine Datei.")], model="m"))
-    await client.queue.put(ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="sdk-1", result="Fertig, eine Datei."))
+    await client.queue.put(
+        ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="sdk-1",
+            result="Fertig, eine Datei.",
+        )
+    )
     msgs = await _drain(bus, "message", 4)
     roles = [m.data["role"] for m in msgs]
     assert roles == ["user", "assistant", "tool", "assistant"]
@@ -164,7 +208,11 @@ async def test_permission_flow_allow_always_and_deny(tmp_path):
     reqs = await _drain(bus, "permission_request", 1)
     req = reqs[0].data
     assert req["kind"] == "permission" and req["tool_name"] == "Bash" and req["title"] == "Run ls"
-    assert state.data.attention == "waiting_input" and state.session.status == "waiting" and needs == ["permission"]
+    assert (
+        state.data.attention == "waiting_input"
+        and state.session.status == "waiting"
+        and needs == ["permission"]
+    )
     assert session.oldest_pending().id == req["id"]
     assert session.resolve_permission(req["id"], "allow_always") is True
     result = await task
@@ -186,13 +234,24 @@ async def test_permission_flow_allow_always_and_deny(tmp_path):
 async def test_ask_user_question_flow(tmp_path):
     session, bus, state, _, needs = await _session(tmp_path)
     await session.start(str(tmp_path))
-    q = {"questions": [{"question": "Format?", "header": "F", "options": [{"label": "Kurz"}, {"label": "Lang"}], "multiSelect": False}]}
+    q = {
+        "questions": [
+            {
+                "question": "Format?",
+                "header": "F",
+                "options": [{"label": "Kurz"}, {"label": "Lang"}],
+                "multiSelect": False,
+            }
+        ]
+    }
     task = asyncio.create_task(session._can_use_tool("AskUserQuestion", q, ToolPermissionContext()))
     reqs = await _drain(bus, "permission_request", 1)
     assert reqs[0].data["kind"] == "question" and reqs[0].data["questions"][0]["question"] == "Format?"
     session.resolve_permission(reqs[0].data["id"], "allow", answers={"Format?": "Kurz"})
     result = await task
-    assert isinstance(result, PermissionResultAllow) and result.updated_input["answers"] == {"Format?": "Kurz"}
+    assert isinstance(result, PermissionResultAllow) and result.updated_input["answers"] == {
+        "Format?": "Kurz"
+    }
     assert needs == ["question"]
     # stopping the session denies whatever is still pending
     task = asyncio.create_task(session._can_use_tool("Bash", {"command": "rm"}, ToolPermissionContext()))

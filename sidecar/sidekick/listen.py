@@ -76,7 +76,11 @@ class ListenController:
     # --- public API ----------------------------------------------------
     @property
     def recording(self) -> bool:
-        return self._task is not None and not self._task.done() and self._state.mode in ("listening", "btw_listening")
+        return (
+            self._task is not None
+            and not self._task.done()
+            and self._state.mode in ("listening", "btw_listening")
+        )
 
     @property
     def busy(self) -> bool:

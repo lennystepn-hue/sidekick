@@ -38,7 +38,9 @@ def test_install_is_idempotent_and_keeps_foreign_hooks(tmp_path):
     stop_groups = data["hooks"]["Stop"]
     assert len(stop_groups) == 2
     assert stop_groups[0]["hooks"][0]["command"] == "echo done"
-    assert stop_groups[1]["hooks"] == [{"type": "http", "url": "http://127.0.0.1:47821/hook/Stop", "timeout": 5}]
+    assert stop_groups[1]["hooks"] == [
+        {"type": "http", "url": "http://127.0.0.1:47821/hook/Stop", "timeout": 5}
+    ]
     assert len(data["hooks"]["Notification"]) == 1
     assert data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "lint"
     status = installer.status(project, "project")
@@ -101,15 +103,26 @@ async def test_btw_builds_context_and_stores(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_x.py").write_text("x", encoding="utf-8")
     msgs = [{"role": "user", "text": "Mach X"}, {"role": "assistant", "text": "X gemacht"}]
-    btw = BtwAssistant(llm, Database(tmp_path / "t.db"), lambda: Settings(), state, bus, lambda: ("s1", msgs, str(tmp_path)))
+    btw = BtwAssistant(
+        llm, Database(tmp_path / "t.db"), lambda: Settings(), state, bus, lambda: ("s1", msgs, str(tmp_path))
+    )
     record = await btw.ask("Wo liegen die Tests?")
     assert record["answer"] == "Die Tests liegen unter tests." and record["session_id"] == "s1"
     prompt = llm.calls[0]["prompt"]
-    assert "tests/test_x.py" in prompt and "[assistant] X gemacht" in prompt and "Wo liegen die Tests?" in prompt
+    assert (
+        "tests/test_x.py" in prompt and "[assistant] X gemacht" in prompt and "Wo liegen die Tests?" in prompt
+    )
     assert llm.calls[0]["model"] == "claude-sonnet-5" and "btw" in llm.calls[0]["system"]
     assert any(e.type == "btw_answer" for e in bus.history)
     assert btw._db.list_btw()[0]["question"] == "Wo liegen die Tests?"
-    failing = BtwAssistant(FakeLLM(error=RuntimeError("down")), Database(tmp_path / "t2.db"), lambda: Settings(), state, bus, lambda: (None, [], None))
+    failing = BtwAssistant(
+        FakeLLM(error=RuntimeError("down")),
+        Database(tmp_path / "t2.db"),
+        lambda: Settings(),
+        state,
+        bus,
+        lambda: (None, [], None),
+    )
     rec = await failing.ask("Hm?")
     assert rec["answer"].startswith("Das konnte ich gerade nicht beantworten")
 
@@ -130,8 +143,12 @@ def test_parse_health_code_10_from_this_machine():
 
 
 def test_parse_health_ok_and_empty():
-    ok = parse_health('[{"FriendlyName":"X","Status":"OK","Problem":0,"ProblemDescription":null,"InstanceId":"PCI\\\\1"}]')
+    ok = parse_health(
+        '[{"FriendlyName":"X","Status":"OK","Problem":0,"ProblemDescription":null,"InstanceId":"PCI\\\\1"}]'
+    )
     assert ok.ok is True and ok.problem_code is None and ok.instance_id == "PCI\\1"
     assert parse_health("").ok is False and parse_health("garbage").ok is False
-    two = parse_health('[{"FriendlyName":"A","Status":"OK","Problem":0,"InstanceId":"1"},{"FriendlyName":"B","Status":"Error","Problem":43,"ProblemDescription":"x (Code 43).","InstanceId":"2"}]')
+    two = parse_health(
+        '[{"FriendlyName":"A","Status":"OK","Problem":0,"InstanceId":"1"},{"FriendlyName":"B","Status":"Error","Problem":43,"ProblemDescription":"x (Code 43).","InstanceId":"2"}]'
+    )
     assert two.ok is False and two.adapter_name == "B" and two.problem_code == 43

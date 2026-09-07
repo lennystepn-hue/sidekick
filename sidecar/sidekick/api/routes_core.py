@@ -63,7 +63,9 @@ async def get_secrets(services: Services = Depends(get_services)) -> dict[str, b
 
 
 @router.put("/secrets/{name}")
-async def put_secret(name: str, body: SecretBody, services: Services = Depends(get_services)) -> dict[str, Any]:
+async def put_secret(
+    name: str, body: SecretBody, services: Services = Depends(get_services)
+) -> dict[str, Any]:
     if name not in SECRET_NAMES:
         raise HTTPException(status_code=404, detail=f"unknown secret {name}")
     if not body.value.strip():

@@ -72,7 +72,10 @@ if sys.platform == "win32":
         ]
 
     class SYSTEMTIME(ctypes.Structure):
-        _fields_ = [(n, wintypes.WORD) for n in ("wYear", "wMonth", "wDayOfWeek", "wDay", "wHour", "wMinute", "wSecond", "wMilliseconds")]
+        _fields_ = [
+            (n, wintypes.WORD)
+            for n in ("wYear", "wMonth", "wDayOfWeek", "wDay", "wHour", "wMinute", "wSecond", "wMilliseconds")
+        ]
 
     class BLUETOOTH_DEVICE_INFO(ctypes.Structure):
         _fields_ = [
@@ -92,17 +95,28 @@ if sys.platform == "win32":
 
     _bt = ctypes.WinDLL("bthprops.cpl")
     _bt.BluetoothFindFirstDevice.restype = wintypes.HANDLE
-    _bt.BluetoothFindFirstDevice.argtypes = [ctypes.POINTER(BLUETOOTH_DEVICE_SEARCH_PARAMS), ctypes.POINTER(BLUETOOTH_DEVICE_INFO)]
+    _bt.BluetoothFindFirstDevice.argtypes = [
+        ctypes.POINTER(BLUETOOTH_DEVICE_SEARCH_PARAMS),
+        ctypes.POINTER(BLUETOOTH_DEVICE_INFO),
+    ]
     _bt.BluetoothFindNextDevice.restype = wintypes.BOOL
     _bt.BluetoothFindNextDevice.argtypes = [wintypes.HANDLE, ctypes.POINTER(BLUETOOTH_DEVICE_INFO)]
     _bt.BluetoothFindDeviceClose.restype = wintypes.BOOL
     _bt.BluetoothFindDeviceClose.argtypes = [wintypes.HANDLE]
     _bt.BluetoothFindFirstRadio.restype = wintypes.HANDLE
-    _bt.BluetoothFindFirstRadio.argtypes = [ctypes.POINTER(BLUETOOTH_FIND_RADIO_PARAMS), ctypes.POINTER(wintypes.HANDLE)]
+    _bt.BluetoothFindFirstRadio.argtypes = [
+        ctypes.POINTER(BLUETOOTH_FIND_RADIO_PARAMS),
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
     _bt.BluetoothFindRadioClose.restype = wintypes.BOOL
     _bt.BluetoothFindRadioClose.argtypes = [wintypes.HANDLE]
     _bt.BluetoothSetServiceState.restype = wintypes.DWORD
-    _bt.BluetoothSetServiceState.argtypes = [wintypes.HANDLE, ctypes.POINTER(BLUETOOTH_DEVICE_INFO), ctypes.POINTER(GUID), wintypes.DWORD]
+    _bt.BluetoothSetServiceState.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(BLUETOOTH_DEVICE_INFO),
+        ctypes.POINTER(GUID),
+        wintypes.DWORD,
+    ]
 
 
 def _no_window_flags() -> int:
@@ -177,7 +191,11 @@ class WinBluetoothBackend:
             info.dwSize = ctypes.sizeof(info)
             info.Address = device.address
             guid = GUID.from_string(service_guid)
-            return int(_bt.BluetoothSetServiceState(hradio, ctypes.byref(info), ctypes.byref(guid), 1 if enable else 0))
+            return int(
+                _bt.BluetoothSetServiceState(
+                    hradio, ctypes.byref(info), ctypes.byref(guid), 1 if enable else 0
+                )
+            )
         finally:
             _bt.BluetoothFindRadioClose(find)
             ctypes.windll.kernel32.CloseHandle(hradio)
@@ -232,7 +250,10 @@ def read_battery_sync(name_substring: str) -> int | None:
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, text=True, timeout=15, creationflags=_no_window_flags(),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=_no_window_flags(),
         ).stdout.strip()
     except Exception as exc:  # noqa: BLE001
         log.debug("battery query failed: %s", exc)

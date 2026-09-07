@@ -83,7 +83,9 @@ async def send_to_session(body: SendBody, services: Services = Depends(get_servi
 
 
 @router.post("/session/permission/{pending_id}")
-async def resolve_permission(pending_id: str, body: PermissionBody, services: Services = Depends(get_services)) -> dict[str, Any]:
+async def resolve_permission(
+    pending_id: str, body: PermissionBody, services: Services = Depends(get_services)
+) -> dict[str, Any]:
     try:
         ok = services.session.resolve_permission(pending_id, body.decision, body.answers, body.message)
     except ValueError as exc:
@@ -94,7 +96,9 @@ async def resolve_permission(pending_id: str, body: PermissionBody, services: Se
 
 
 @router.get("/session/messages")
-async def session_messages(limit: int = 200, services: Services = Depends(get_services)) -> list[dict[str, Any]]:
+async def session_messages(
+    limit: int = 200, services: Services = Depends(get_services)
+) -> list[dict[str, Any]]:
     sid = services.session.session_id
     if sid is None:
         info = services.state.session

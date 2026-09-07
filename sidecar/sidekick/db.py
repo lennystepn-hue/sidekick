@@ -114,7 +114,9 @@ class Database:
         return out
 
     # --- transcripts ----------------------------------------------------
-    def add_transcript(self, id: str, raw: str, cleaned: str, status: str = "reviewing", target: str = "") -> None:
+    def add_transcript(
+        self, id: str, raw: str, cleaned: str, status: str = "reviewing", target: str = ""
+    ) -> None:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO transcripts(id, raw, cleaned, sent, status, target, ts) VALUES (?,?,?,?,?,?,?)",
@@ -122,20 +124,29 @@ class Database:
             )
             self._conn.commit()
 
-    def mark_transcript(self, id: str, status: str, sent: bool, target: str | None = None, cleaned: str | None = None) -> None:
+    def mark_transcript(
+        self, id: str, status: str, sent: bool, target: str | None = None, cleaned: str | None = None
+    ) -> None:
         with self._lock:
             if target is None and cleaned is None:
                 self._conn.execute(
                     "UPDATE transcripts SET status=?, sent=? WHERE id=?", (status, int(sent), id)
                 )
             else:
-                row = self._conn.execute("SELECT target, cleaned FROM transcripts WHERE id=?", (id,)).fetchone()
+                row = self._conn.execute(
+                    "SELECT target, cleaned FROM transcripts WHERE id=?", (id,)
+                ).fetchone()
                 if row is None:
                     return
                 self._conn.execute(
                     "UPDATE transcripts SET status=?, sent=?, target=?, cleaned=? WHERE id=?",
-                    (status, int(sent), target if target is not None else row["target"],
-                     cleaned if cleaned is not None else row["cleaned"], id),
+                    (
+                        status,
+                        int(sent),
+                        target if target is not None else row["target"],
+                        cleaned if cleaned is not None else row["cleaned"],
+                        id,
+                    ),
                 )
             self._conn.commit()
 

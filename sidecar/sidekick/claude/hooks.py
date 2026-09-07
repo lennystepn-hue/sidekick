@@ -25,11 +25,20 @@ from .transcript import last_assistant_text
 log = logging.getLogger(__name__)
 
 NEEDS_INPUT_TYPES = {
-    "permission_prompt", "idle_prompt", "agent_needs_input", "elicitation_dialog", "elicitation_url_dialog",
+    "permission_prompt",
+    "idle_prompt",
+    "agent_needs_input",
+    "elicitation_dialog",
+    "elicitation_url_dialog",
 }
 IGNORED_NOTIFICATIONS = {
-    "auth_success", "elicitation_complete", "elicitation_response", "agent_completed",
-    "quota_auto_resume_fired", "quota_auto_resume_stale", "quota_auto_resume_disabled",
+    "auth_success",
+    "elicitation_complete",
+    "elicitation_response",
+    "agent_completed",
+    "quota_auto_resume_fired",
+    "quota_auto_resume_stale",
+    "quota_auto_resume_disabled",
 }
 DEDUPE_WINDOW_S = 5.0
 
@@ -92,7 +101,10 @@ class HookHandler:
 
     # --- queries ---------------------------------------------------------
     def list_sessions(self) -> list[dict[str, Any]]:
-        return [s.to_dict() for s in sorted(self.sessions.values(), key=lambda s: (s.last_ts, s.seq), reverse=True)]
+        return [
+            s.to_dict()
+            for s in sorted(self.sessions.values(), key=lambda s: (s.last_ts, s.seq), reverse=True)
+        ]
 
     def latest(self) -> ExternalSession | None:
         active = [s for s in self.sessions.values() if s.active]
@@ -123,7 +135,9 @@ class HookHandler:
             summary = await self._dispatch(event, session, payload)
         except Exception:  # noqa: BLE001
             log.exception("hook %s failed", event)
-            self._bus.publish("error", {"module": "hooks", "message": f"Hook {event} konnte nicht verarbeitet werden"})
+            self._bus.publish(
+                "error", {"module": "hooks", "message": f"Hook {event} konnte nicht verarbeitet werden"}
+            )
         self._bus.publish(
             "hook_event", {"event": event, "session_id": sid, "cwd": session.cwd, "summary": summary}
         )
@@ -175,7 +189,9 @@ class HookHandler:
             spoken = self._summarizer.format_permission(tool_name, tool_input, message or None)
         else:
             spoken = self._summarizer.format_needs_input(message or "Claude wartet auf deine Eingabe.")
-            if self._duplicate(f"{session.session_id}:{ntype}:{hashlib.sha1(spoken.encode()).hexdigest()[:8]}"):
+            if self._duplicate(
+                f"{session.session_id}:{ntype}:{hashlib.sha1(spoken.encode()).hexdigest()[:8]}"
+            ):
                 return ""
         session.attention = True
         self._sounds.play("needs_input")
