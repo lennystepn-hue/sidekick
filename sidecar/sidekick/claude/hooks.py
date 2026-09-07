@@ -52,6 +52,7 @@ class ExternalSession:
     attention: bool = False
     active: bool = True
     last_summary: str = ""
+    seq: int = 0  # ordering tie-breaker (time.time() resolution on Windows is ~15 ms)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,16 +88,17 @@ class HookHandler:
         self._embedded_waiting = embedded_waiting or (lambda: False)
         self.sessions: dict[str, ExternalSession] = {}
         self._recent: dict[str, float] = {}
+        self._seq = 0
 
     # --- queries ---------------------------------------------------------
     def list_sessions(self) -> list[dict[str, Any]]:
-        return [s.to_dict() for s in sorted(self.sessions.values(), key=lambda s: s.last_ts, reverse=True)]
+        return [s.to_dict() for s in sorted(self.sessions.values(), key=lambda s: (s.last_ts, s.seq), reverse=True)]
 
     def latest(self) -> ExternalSession | None:
         active = [s for s in self.sessions.values() if s.active]
         if not active:
             return None
-        return max(active, key=lambda s: s.last_ts)
+        return max(active, key=lambda s: (s.last_ts, s.seq))
 
     # --- handling --------------------------------------------------------
     async def handle(self, event: str | None, payload: dict[str, Any]) -> None:
@@ -112,6 +114,8 @@ class HookHandler:
         session.transcript_path = str(payload.get("transcript_path") or session.transcript_path)
         session.last_event = event
         session.last_ts = time.time()
+        self._seq += 1
+        session.seq = self._seq
         session.active = True
         summary = ""
         try:

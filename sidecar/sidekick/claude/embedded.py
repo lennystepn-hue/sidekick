@@ -306,7 +306,9 @@ class EmbeddedSession:
                 self.sdk_session_id = (message.data or {}).get("session_id")
             return
         if isinstance(message, AssistantMessage):
-            blocks = blocks_from_content(message.content)
+            blocks = [b for b in blocks_from_content(message.content) if not (b["type"] == "thinking" and not b.get("text"))]
+            if not blocks:
+                return
             text = "\n".join(b["text"] for b in blocks if b["type"] == "text").strip()
             if text:
                 self._last_assistant_text = text

@@ -24,9 +24,13 @@ async def _payload(request: Request) -> dict[str, Any]:
     if not body:
         return {}
     try:
-        data = json.loads(body)
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        text = body.decode("cp1252", errors="replace")
+    try:
+        data = json.loads(text)
     except json.JSONDecodeError:
-        return {"raw": body.decode("utf-8", errors="replace")[:2000]}
+        return {"raw": text[:2000]}
     return data if isinstance(data, dict) else {"raw": data}
 
 
