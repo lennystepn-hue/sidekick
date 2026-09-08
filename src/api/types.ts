@@ -128,8 +128,13 @@ export interface BluetoothAdapterState {
 }
 
 export interface ModelsState {
-  whisper_loaded: boolean;
-  whisper_model: string;
+  /** Selected speech engine ("parakeet" | "faster-whisper"), its model label, and load/download state. */
+  stt_engine: string;
+  stt_model: string;
+  stt_loaded: boolean;
+  stt_downloading: boolean;
+  /** 0..1 while downloading. */
+  stt_progress: number;
 }
 
 export interface AppState {
@@ -369,9 +374,11 @@ export interface AudioSettings {
   tone_volume: number;
 }
 export interface SttSettings {
-  engine: "faster-whisper" | "deepgram";
+  engine: "parakeet" | "faster-whisper" | "deepgram";
   model: string;
   compute_type: string;
+  parakeet_model: string;
+  parakeet_quantization: string;
   silence_timeout_s: number;
   no_speech_timeout_s: number;
   max_duration_s: number;

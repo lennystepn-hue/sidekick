@@ -38,6 +38,7 @@ for package in (
     "faster_whisper",
     "ctranslate2",
     "onnxruntime",
+    "onnx_asr",
     "claude_agent_sdk",
     "miniaudio",
     "sounddevice",

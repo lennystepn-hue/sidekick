@@ -33,7 +33,7 @@ class Cleaner:
         self._timeout = timeout_s
         self.system_prompt = load_prompt("cleanup")
 
-    async def clean(self, raw: str) -> tuple[str, bool]:
+    async def clean(self, raw: str, hotwords: list[str] | None = None) -> tuple[str, bool]:
         """Return (text, cleaned). On any failure the raw text comes back with cleaned=False."""
         raw = raw.strip()
         if not raw:
@@ -41,7 +41,9 @@ class Cleaner:
         cfg = self._settings()
         if not cfg.stt.cleanup_enabled:
             return raw, False
-        prompt = f"Transkript:\n<<<\n{raw}\n>>>\n\nBereinigter Text:"
+        terms = ", ".join(t.strip() for t in (hotwords or []) if t.strip())
+        known = f"Bekannte Begriffe: {terms}\n\n" if terms else ""
+        prompt = f"{known}Transkript:\n<<<\n{raw}\n>>>\n\nBereinigter Text:"
         try:
             out = await asyncio.wait_for(
                 self._llm.complete(cfg.claude.cleanup_model, self.system_prompt, prompt), self._timeout
