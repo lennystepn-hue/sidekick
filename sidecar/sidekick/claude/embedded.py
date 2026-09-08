@@ -2,6 +2,8 @@
 
 Streams assistant text, tool calls and results to the UI, persists messages, and turns
 `can_use_tool` callbacks into `PendingPermission`s the UI or the voice pipeline resolves.
+Several sessions can run at once (see `sessions.SessionManager`); each instance owns its
+`info` and reports changes through `notify`.
 """
 
 from __future__ import annotations
@@ -10,7 +12,8 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 from ..config import Settings
@@ -22,6 +25,7 @@ log = logging.getLogger(__name__)
 
 DoneHandler = Callable[[str], Awaitable[None] | None]
 SETTING_SOURCES = ["user", "project", "local"]
+TITLE_MAX = 60
 
 
 @dataclass
@@ -99,6 +103,11 @@ def blocks_from_content(content: Any) -> list[dict[str, Any]]:
     return out
 
 
+def auto_title(text: str) -> str:
+    first = " ".join(text.strip().split())
+    return first if len(first) <= TITLE_MAX else first[: TITLE_MAX - 1] + "…"
+
+
 class EmbeddedSession:
     def __init__(
         self,
@@ -110,6 +119,8 @@ class EmbeddedSession:
         on_needs_input: Callable[[PendingPermission], Awaitable[None] | None] | None = None,
         client_factory: Callable[[Any], Any] | None = None,
         attention_refresh: Callable[[], None] | None = None,
+        notify: Callable[[EmbeddedSession], None] | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._settings = settings
         self._state = state
@@ -119,12 +130,15 @@ class EmbeddedSession:
         self._on_needs_input = on_needs_input
         self._client_factory = client_factory or self._default_client
         self._attention_refresh = attention_refresh
+        self._notify_cb = notify
         self._client: Any = None
         self._reader: asyncio.Task | None = None
         self.pending: dict[str, PendingPermission] = {}
-        self.session_id: str | None = None
+        self.session_id: str | None = session_id
         self.sdk_session_id: str | None = None
         self.cwd: str | None = None
+        self.info: SessionInfo | None = None
+        self.title_auto = True
         self._last_assistant_text = ""
         self._stream_message_id: str | None = None
         self._interrupted = False
@@ -136,7 +150,7 @@ class EmbeddedSession:
 
         return ClaudeSDKClient(options)
 
-    def _build_options(self, cwd: str, model: str | None) -> Any:
+    def _build_options(self, cwd: str, model: str | None, resume: str | None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
 
         cfg = self._settings().claude
@@ -148,6 +162,7 @@ class EmbeddedSession:
             include_partial_messages=True,
             setting_sources=list(SETTING_SOURCES),
             cli_path=cfg.cli_path or None,
+            resume=resume or None,
         )
 
     @property
@@ -159,8 +174,24 @@ class EmbeddedSession:
         """A CLI process may still be attached even after the reader ended."""
         return self._client is not None
 
-    def info(self) -> SessionInfo | None:
-        return self._state.session
+    @property
+    def title(self) -> str:
+        return self.info.title if self.info else ""
+
+    def _notify(self) -> None:
+        if self._notify_cb is not None:
+            self._notify_cb(self)
+        else:  # standalone use (tests): mirror into the single state slot
+            self._state.update(session=self.info)
+
+    def _set(self, **fields: Any) -> None:
+        if self.info is None:
+            return
+        new = replace(self.info, **fields)
+        if new == self.info:
+            return
+        self.info = new
+        self._notify()
 
     def _clear_attention(self) -> None:
         if self._attention_refresh is not None:
@@ -168,34 +199,71 @@ class EmbeddedSession:
         else:
             self._state.update(attention="none")
 
+    def summary(self) -> dict[str, Any]:
+        info = self.info
+        if info is None:
+            return {}
+        return {
+            "id": info.id,
+            "cwd": info.cwd,
+            "title": info.title,
+            "mode": info.mode,
+            "status": info.status,
+            "model": info.model,
+            "permission_mode": info.permission_mode,
+            "started_at": info.started_at,
+            "last_active": info.last_active,
+            "sdk_session_id": info.sdk_session_id,
+            "message_count": self._db.count_messages(info.id),
+            "pending": len(self.pending),
+            "resumable": bool(info.sdk_session_id) and not self.running,
+        }
+
     # --- lifecycle -----------------------------------------------------
-    async def start(self, cwd: str, model: str | None = None) -> SessionInfo:
+    async def start(
+        self, cwd: str, model: str | None = None, resume: str | None = None, title: str | None = None
+    ) -> SessionInfo:
         if self._client is not None:
             await self.stop()
-        self.session_id = new_id()
-        self.sdk_session_id = None
+        self.session_id = self.session_id or new_id()
+        self.sdk_session_id = resume
         self.cwd = cwd
         self._last_assistant_text = ""
         self._interrupted = False
-        options = self._build_options(cwd, model)
+        self.title_auto = not title
+        options = self._build_options(cwd, model, resume)
         client = self._client_factory(options)
         await client.connect()
         self._client = client
-        info = SessionInfo(
+        cfg = self._settings().claude
+        now = now_iso()
+        self.info = SessionInfo(
             id=self.session_id,
             cwd=cwd,
             mode="embedded",
             status="idle",
             model=model or "",
-            started_at=now_iso(),
-            permission_mode=self._settings().claude.permission_mode,
+            started_at=now,
+            permission_mode=cfg.permission_mode,
+            title=title or Path(cwd).name or cwd,
+            sdk_session_id=resume,
+            last_active=now,
         )
-        self._db.add_session(self.session_id, cwd, "embedded")
-        self._state.update(session=info)
+        self._db.add_session(
+            self.session_id,
+            cwd,
+            "embedded",
+            title=self.info.title,
+            model=model or "",
+            permission_mode=cfg.permission_mode,
+            sdk_session_id=resume,
+            title_auto=self.title_auto,
+        )
+        self._notify()
         self._clear_attention()
-        self._reader = asyncio.create_task(self._read_loop(), name="embedded-reader")
-        log.info("embedded session %s started in %s", self.session_id, cwd)
-        return info
+        self._reader = asyncio.create_task(self._read_loop(), name=f"embedded-{self.session_id}")
+        log.info("embedded session %s %s in %s", self.session_id, "resumed" if resume else "started", cwd)
+        return self.info
 
     async def stop(self) -> None:
         for pending in list(self.pending.values()):
@@ -213,10 +281,9 @@ class EmbeddedSession:
                 pass
         if self.session_id:
             self._db.end_session(self.session_id)
-        if self._state.session is not None:
-            self._state.update_session(status="stopped")
+        self._set(status="stopped")
         self._clear_attention()
-        log.info("embedded session stopped")
+        log.info("embedded session %s stopped", self.session_id)
 
     async def send(self, text: str) -> None:
         if not self.running or self.session_id is None:
@@ -226,9 +293,22 @@ class EmbeddedSession:
             return
         msg = self._db.add_message(self.session_id, "user", [{"type": "text", "text": text}])
         self._bus.publish("message", msg)
-        self._state.update_session(status="running")
+        fields: dict[str, Any] = {"status": "running", "last_active": now_iso()}
+        if self.title_auto and self.info is not None:
+            fields["title"] = auto_title(text)
+            self.title_auto = False
+            self._db.update_session(self.session_id, title=fields["title"], title_auto=False)
+        self._db.update_session(self.session_id, last_active=fields["last_active"])
+        self._set(**fields)
         self._interrupted = False
         await self._client.query(text)
+
+    def rename(self, title: str) -> None:
+        title = " ".join(title.split())[:TITLE_MAX] or (self.info.title if self.info else "")
+        self.title_auto = False
+        if self.session_id:
+            self._db.update_session(self.session_id, title=title, title_auto=False)
+        self._set(title=title)
 
     async def interrupt(self) -> None:
         if self.running:
@@ -239,8 +319,8 @@ class EmbeddedSession:
         """Switch the running session's permission mode (settings change)."""
         if self.running and hasattr(self._client, "set_permission_mode"):
             await self._client.set_permission_mode(mode)
-            log.info("permission mode switched to %s", mode)
-            self._state.update_session(permission_mode=mode)
+            log.info("permission mode of %s switched to %s", self.session_id, mode)
+            self._set(permission_mode=mode)
 
     def on_settings_changed(self, old: Settings, new: Settings) -> None:
         if old.claude.permission_mode != new.claude.permission_mode and self.running:
@@ -269,7 +349,7 @@ class EmbeddedSession:
         )
         self.pending[pending.id] = pending
         self._state.update(attention="waiting_input")
-        self._state.update_session(status="waiting")
+        self._set(status="waiting")
         self._bus.publish("permission_request", pending.to_dict())
         if self._on_needs_input is not None:
             try:
@@ -283,9 +363,11 @@ class EmbeddedSession:
         finally:
             self.pending.pop(pending.id, None)
             if not self.pending:
-                if self._state.session is not None and self._state.session.status == "waiting":
-                    self._state.update_session(status="running")
+                if self.info is not None and self.info.status == "waiting":
+                    self._set(status="running")
                 self._clear_attention()
+            else:
+                self._notify()
         self._bus.publish("permission_resolved", {"id": pending.id, "decision": decision})
         if decision == "deny":
             return PermissionResultDeny(message=message or "Vom Nutzer abgelehnt")
@@ -337,14 +419,20 @@ class EmbeddedSession:
                 self._bus.publish("error", {"module": "session", "message": f"Session abgebrochen: {exc}"})
         finally:
             if ended_unexpectedly:
-                log.warning("embedded session CLI exited")
-                if self._state.session is not None:
-                    self._state.update_session(status="stopped")
+                log.warning("embedded session %s CLI exited", self.session_id)
                 for pending in list(self.pending.values()):
                     if not pending.future.done():
                         pending.future.set_result(("deny", None, "Session beendet"))
                 self.pending.clear()
+                self._set(status="stopped")
                 self._clear_attention()
+
+    def _record_sdk_id(self, sdk_id: str | None) -> None:
+        if sdk_id and sdk_id != self.sdk_session_id:
+            self.sdk_session_id = sdk_id
+            if self.session_id:
+                self._db.update_session(self.session_id, sdk_session_id=sdk_id)
+            self._set(sdk_session_id=sdk_id)
 
     async def _handle(self, message: Any) -> None:
         from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, UserMessage
@@ -375,7 +463,7 @@ class EmbeddedSession:
             return
         if isinstance(message, SystemMessage):
             if message.subtype == "init":
-                self.sdk_session_id = (message.data or {}).get("session_id")
+                self._record_sdk_id((message.data or {}).get("session_id"))
             return
         if isinstance(message, AssistantMessage):
             blocks = [
@@ -401,8 +489,11 @@ class EmbeddedSession:
                 self._bus.publish("message", msg)
             return
         if isinstance(message, ResultMessage):
-            self.sdk_session_id = message.session_id or self.sdk_session_id
-            self._state.update_session(status="idle")
+            self._record_sdk_id(message.session_id)
+            now = now_iso()
+            if self.session_id:
+                self._db.update_session(self.session_id, last_active=now)
+            self._set(status="idle", last_active=now)
             final = self._last_assistant_text or (message.result or "")
             interrupted, self._interrupted = self._interrupted, False
             if message.is_error:

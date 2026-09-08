@@ -31,6 +31,9 @@ class SessionInfo:
     model: str = ""
     started_at: str = ""
     permission_mode: str = "auto"
+    title: str = ""
+    sdk_session_id: str | None = None
+    last_active: str = ""
 
 
 @dataclass(slots=True)
@@ -61,6 +64,8 @@ class AppStateData:
     bluetooth_adapter: AdapterState = field(default_factory=AdapterState)
     models: ModelsState = field(default_factory=ModelsState)
     external_sessions: int = 0
+    sessions: list[dict[str, Any]] = field(default_factory=list)
+    active_session_id: str | None = None
 
 
 class AppState:

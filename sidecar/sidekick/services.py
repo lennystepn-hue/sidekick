@@ -49,7 +49,7 @@ class Services:
     presence: Any = None
     bluetooth: Any = None
     bluetooth_doctor: Any = None
-    session: Any = None
+    sessions: Any = None
     hooks: Any = None
     btw: Any = None
     listen: Any = None
@@ -57,6 +57,11 @@ class Services:
     clipboard: Callable[[str], None] | None = None
     clipboard_get: Callable[[], str | None] | None = None
     _started: bool = False
+
+    @property
+    def session(self) -> Any:
+        """The active embedded session (or None)."""
+        return self.sessions.active if self.sessions is not None else None
 
     # --- lifecycle -----------------------------------------------------
     async def start(self) -> None:
@@ -289,6 +294,7 @@ def build_services(
     from .claude.btw import BtwAssistant
     from .claude.embedded import EmbeddedSession, PendingPermission
     from .claude.hooks import HookHandler
+    from .claude.sessions import SessionManager
     from .claude.summarize import Summarizer
     from .claude.transcript import recent_messages
     from .claude.utility import UtilityLLM
@@ -442,22 +448,22 @@ def build_services(
         speaker,
         summarizer,
         settings,
-        embedded_waiting=lambda: bool(services.session.pending) if services.session else False,
-        ignore_session_ids=lambda: (
-            {services.session.sdk_session_id}
-            if services.session and services.session.sdk_session_id
-            else set()
-        ),
+        embedded_waiting=lambda: services.sessions.any_pending() if services.sessions else False,
+        ignore_session_ids=lambda: services.sessions.sdk_ids() if services.sessions else set(),
     )
     services.hooks = hooks
 
-    # --- embedded session ----------------------------------------------------------
-    async def on_done(text: str) -> None:
+    # --- embedded sessions ---------------------------------------------------------
+    def _prefix(session: EmbeddedSession) -> str:
+        # With several sessions running, say which one is talking.
+        return f"{session.title}: " if len(sessions.running()) > 1 and session.title else ""
+
+    async def on_done(text: str, session: EmbeddedSession) -> None:
         sounds.play("done")
         summary = await summarizer.summarize(text)
-        speaker.speak(summary, kind="done")
+        speaker.speak(_prefix(session) + summary, kind="done")
 
-    async def on_needs_input(pending: PendingPermission) -> None:
+    async def on_needs_input(pending: PendingPermission, session: EmbeddedSession) -> None:
         sounds.play("needs_input")
         if pending.kind == "question" and pending.questions:
             q = pending.questions[0]
@@ -467,17 +473,19 @@ def build_services(
             spoken = summarizer.format_permission(
                 pending.tool_name, pending.input, pending.description or None
             )
-        speaker.speak(spoken, kind="needs_input")
+        speaker.speak(_prefix(session) + spoken, kind="needs_input")
 
-    session = EmbeddedSession(
+    sessions = SessionManager(
         settings, state, bus, db, on_done, on_needs_input, attention_refresh=hooks.refresh_state
     )
-    services.session = session
+    services.sessions = sessions
+    sessions.load()
 
     # --- btw -----------------------------------------------------------------------------
     def btw_context() -> tuple[str | None, list[dict[str, str]], str | None]:
         n = settings().btw.context_messages
-        if session.running and session.session_id:
+        session = sessions.active
+        if session is not None and session.session_id:
             msgs = []
             for m in db.list_messages(session.session_id, n * 2):
                 text = "\n".join(b.get("text", "") for b in m["blocks"] if b.get("type") == "text").strip()
@@ -580,7 +588,9 @@ def build_services(
     )
     services.gestures = gestures
 
-    services.components.extend([speaker, presence, gestures, stt, _SettingsRelay(session), _Background(services)])
+    services.components.extend(
+        [speaker, presence, gestures, stt, _SettingsRelay(sessions), _Background(services)]
+    )
     if hardware:
         services.components.append(doctor)
     services.components.append(_Shutdown(services))
@@ -590,11 +600,11 @@ def build_services(
 class _SettingsRelay:
     """Forwards settings changes to the embedded session without exposing its start/stop."""
 
-    def __init__(self, session: Any) -> None:
-        self._session = session
+    def __init__(self, sessions: Any) -> None:
+        self._sessions = sessions
 
     def on_settings_changed(self, old: Settings, new: Settings) -> None:
-        self._session.on_settings_changed(old, new)
+        self._sessions.on_settings_changed(old, new)
 
 
 class _Shutdown:
@@ -606,8 +616,8 @@ class _Shutdown:
     async def stop(self) -> None:
         s = self._s
         try:
-            if s.session is not None and s.session.client_active:
-                await s.session.stop()
+            if s.sessions is not None:
+                await s.sessions.stop_all()
         except Exception:  # noqa: BLE001
             log.exception("session stop failed")
         try:

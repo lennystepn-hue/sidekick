@@ -1,4 +1,4 @@
-"""Embedded session control."""
+"""Active-session routes (kept for the original contract; they act on the active session)."""
 
 from __future__ import annotations
 
@@ -31,11 +31,16 @@ class PermissionBody(BaseModel):
 
 
 def _session_payload(services: Services) -> dict[str, Any]:
-    info = services.state.session
+    manager = services.sessions
+    active = manager.active if manager else None
+    pending = []
+    if manager is not None:
+        for s in manager.live.values():
+            pending.extend(p.to_dict() for p in s.pending.values())
     return {
-        "session": None if info is None else services.state.to_dict()["session"],
-        "pending": [p.to_dict() for p in services.session.pending.values()],
-        "sdk_session_id": services.session.sdk_session_id,
+        "session": services.state.to_dict()["session"],
+        "pending": pending,
+        "sdk_session_id": active.sdk_session_id if active else None,
     }
 
 
@@ -50,7 +55,7 @@ async def start_session(body: StartBody, services: Services = Depends(get_servic
     if not cwd.is_dir():
         raise HTTPException(status_code=422, detail=f"Kein Verzeichnis: {cwd}")
     try:
-        await services.session.start(str(cwd), body.model or None)
+        await services.sessions.create(str(cwd), body.model or None)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Session konnte nicht gestartet werden: {exc}") from exc
     services.settings.claude.last_cwd = str(cwd)
@@ -65,22 +70,26 @@ async def start_session(body: StartBody, services: Services = Depends(get_servic
 
 @router.post("/session/stop")
 async def stop_session(services: Services = Depends(get_services)) -> dict[str, Any]:
-    await services.session.stop()
+    active = services.session
+    if active is not None:
+        await services.sessions.stop(active.session_id)
     return {"ok": True}
 
 
 @router.post("/session/interrupt")
 async def interrupt_session(services: Services = Depends(get_services)) -> dict[str, Any]:
-    await services.session.interrupt()
+    active = services.session
+    if active is not None:
+        await active.interrupt()
     return {"ok": True}
 
 
 @router.post("/session/send")
 async def send_to_session(body: SendBody, services: Services = Depends(get_services)) -> dict[str, Any]:
-    try:
-        await services.session.send(body.text)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    active = services.session
+    if active is None or not active.running:
+        raise HTTPException(status_code=409, detail="Keine laufende Session")
+    await active.send(body.text)
     return {"ok": True}
 
 
@@ -88,8 +97,12 @@ async def send_to_session(body: SendBody, services: Services = Depends(get_servi
 async def resolve_permission(
     pending_id: str, body: PermissionBody, services: Services = Depends(get_services)
 ) -> dict[str, Any]:
+    found = services.sessions.find_pending(pending_id) if services.sessions else None
+    if found is None:
+        raise HTTPException(status_code=404, detail="Keine offene Anfrage mit dieser ID")
+    session, _pending = found
     try:
-        ok = services.session.resolve_permission(pending_id, body.decision, body.answers, body.message)
+        ok = session.resolve_permission(pending_id, body.decision, body.answers, body.message)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not ok:
@@ -101,10 +114,8 @@ async def resolve_permission(
 async def session_messages(
     limit: int = 200, services: Services = Depends(get_services)
 ) -> list[dict[str, Any]]:
-    sid = services.session.session_id
-    if sid is None:
-        info = services.state.session
-        sid = info.id if info else None
+    manager = services.sessions
+    sid = manager.active_id if manager else None
     if sid is None:
         return []
     return services.db.list_messages(sid, limit)

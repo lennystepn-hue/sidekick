@@ -25,6 +25,13 @@ def test_full_app_smoke(tmp_path):
         assert c.post("/glasses/connect").json()["ok"] is True
         assert c.post("/glasses/disconnect").json()["ok"] is True
         assert c.get("/session").json()["session"] is None
+        assert c.get("/sessions").json() == []
+        assert c.post("/sessions", json={"cwd": str(tmp_path / "nope")}).status_code == 422
+        assert c.get("/sessions/zzz/messages").status_code == 404
+        assert c.post("/sessions/zzz/activate").status_code == 404
+        assert c.patch("/sessions/zzz", json={"title": "x"}).status_code == 404
+        assert c.post("/sessions/zzz/send", json={"text": "hi"}).status_code == 409
+        assert c.get("/state").json()["sessions"] == []
         assert c.get("/session/messages").json() == []
         assert c.post("/session/send", json={"text": "hi"}).status_code == 409
         assert c.get("/sessions/external").json() == []

@@ -119,7 +119,9 @@ async def test_embedded_restart_disconnects_dead_client_and_marks_stopped(tmp_pa
     bus = EventBus()
     bus.bind(asyncio.get_running_loop())
     state = AppState(bus)
-    session = EmbeddedSession(lambda: Settings(), state, bus, Database(tmp_path / "t.db"), client_factory=DeadClient)
+    session = EmbeddedSession(
+        lambda: Settings(), state, bus, Database(tmp_path / "t.db"), client_factory=DeadClient
+    )
     await session.start(str(tmp_path))
     first = DeadClient.instances[-1]
     assert session.running and first.options.setting_sources == ["user", "project", "local"]
@@ -144,16 +146,38 @@ async def test_embedded_interrupt_suppresses_done(tmp_path):
     async def on_done(text):
         done.append(text)
 
-    session = EmbeddedSession(lambda: Settings(), state, bus, Database(tmp_path / "t.db"), on_done, client_factory=DeadClient)
+    session = EmbeddedSession(
+        lambda: Settings(), state, bus, Database(tmp_path / "t.db"), on_done, client_factory=DeadClient
+    )
     await session.start(str(tmp_path))
     client = DeadClient.instances[-1]
     await session.send("mach")
     await session.interrupt()
-    await client.queue.put(ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s", result="halb"))
+    await client.queue.put(
+        ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            result="halb",
+        )
+    )
     await asyncio.sleep(0.1)
     assert done == [] and state.session.status == "idle"
     await session.send("weiter")
-    await client.queue.put(ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s", result="fertig"))
+    await client.queue.put(
+        ResultMessage(
+            subtype="success",
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id="s",
+            result="fertig",
+        )
+    )
     await asyncio.sleep(0.1)
     assert done == ["fertig"]
     await session.stop()
@@ -165,7 +189,12 @@ async def test_embedded_attention_routes_through_refresh(tmp_path):
     state = AppState(bus)
     calls = []
     session = EmbeddedSession(
-        lambda: Settings(), state, bus, Database(tmp_path / "t.db"), client_factory=DeadClient, attention_refresh=lambda: calls.append(1)
+        lambda: Settings(),
+        state,
+        bus,
+        Database(tmp_path / "t.db"),
+        client_factory=DeadClient,
+        attention_refresh=lambda: calls.append(1),
     )
     await session.start(str(tmp_path))
     task = asyncio.create_task(session._can_use_tool("Bash", {"command": "ls"}, ToolPermissionContext()))
@@ -204,7 +233,9 @@ def _listen(tmp_path, probs, delay=0.3, cleaner_delay=0.0):
 
     ctl = ListenController(
         capture_factory=lambda: FakeCapture(frames),
-        segmenter_factory=lambda: Segmenter(FakeVad(probs), SegmenterConfig(silence_timeout_s=0.2, min_speech_s=0.1, no_speech_timeout_s=0.5)),
+        segmenter_factory=lambda: Segmenter(
+            FakeVad(probs), SegmenterConfig(silence_timeout_s=0.2, min_speech_s=0.1, no_speech_timeout_s=0.5)
+        ),
         stt=FakeSTT("text"),
         cleaner=Cleaner(SlowLLM(["Text."]), lambda: settings),
         sounds=Sounds(Player(FakeOutput())),
@@ -283,14 +314,23 @@ async def test_hooks_ignore_embedded_session_and_dedupe_without_ids(tmp_path):
     state = AppState(bus)
     sounds, speaker = RecSounds(), RecSpeaker()
     h = HookHandler(
-        state, bus, Database(tmp_path / "t.db"), sounds, speaker, Summarizer(FakeLLM(["s"]), lambda: Settings()),
-        lambda: Settings(), ignore_session_ids=lambda: {"embedded-1"},
+        state,
+        bus,
+        Database(tmp_path / "t.db"),
+        sounds,
+        speaker,
+        Summarizer(FakeLLM(["s"]), lambda: Settings()),
+        lambda: Settings(),
+        ignore_session_ids=lambda: {"embedded-1"},
     )
     await h.handle("Stop", {"session_id": "embedded-1", "last_assistant_message": "x"})
     assert sounds.played == [] and h.sessions == {}
     perm = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
     await h.handle("PermissionRequest", {"session_id": "ext", **perm, "tool_use_id": "tu9"})
-    await h.handle("Notification", {"session_id": "ext", "notification_type": "permission_prompt", "notification_data": perm})
+    await h.handle(
+        "Notification",
+        {"session_id": "ext", "notification_type": "permission_prompt", "notification_data": perm},
+    )
     assert len(speaker.spoken) == 1
 
 

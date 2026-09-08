@@ -13,7 +13,9 @@ from typing import Any
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, cwd TEXT NOT NULL, mode TEXT NOT NULL,
-  started_at TEXT NOT NULL, ended_at TEXT
+  started_at TEXT NOT NULL, ended_at TEXT,
+  title TEXT NOT NULL DEFAULT '', sdk_session_id TEXT, last_active TEXT,
+  model TEXT NOT NULL DEFAULT '', permission_mode TEXT NOT NULL DEFAULT '', title_auto INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -32,6 +34,26 @@ CREATE TABLE IF NOT EXISTS hook_events (
   payload TEXT NOT NULL, ts TEXT NOT NULL
 );
 """
+
+# Columns added after the first release; applied with ALTER TABLE on older databases.
+SESSION_MIGRATIONS = {
+    "title": "TEXT NOT NULL DEFAULT ''",
+    "sdk_session_id": "TEXT",
+    "last_active": "TEXT",
+    "model": "TEXT NOT NULL DEFAULT ''",
+    "permission_mode": "TEXT NOT NULL DEFAULT ''",
+    "title_auto": "INTEGER NOT NULL DEFAULT 1",
+}
+SESSION_UPDATABLE = {
+    "title",
+    "sdk_session_id",
+    "last_active",
+    "model",
+    "permission_mode",
+    "title_auto",
+    "ended_at",
+    "cwd",
+}
 
 HOOK_EVENT_LIMIT = 500
 
@@ -55,32 +77,90 @@ class Database:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         with self._lock:
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self) -> None:
+        existing = {row[1] for row in self._conn.execute("PRAGMA table_info(sessions)").fetchall()}
+        for column, ddl in SESSION_MIGRATIONS.items():
+            if column not in existing:
+                self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {ddl}")
 
     def close(self) -> None:
         with self._lock:
             self._conn.close()
 
     # --- sessions -------------------------------------------------------
-    def add_session(self, id: str, cwd: str, mode: str) -> None:
+    def add_session(
+        self,
+        id: str,
+        cwd: str,
+        mode: str,
+        title: str = "",
+        model: str = "",
+        permission_mode: str = "",
+        sdk_session_id: str | None = None,
+        title_auto: bool = True,
+    ) -> None:
+        """Insert a session, or revive an existing one (resume) keeping its history."""
+        now = now_iso()
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO sessions(id, cwd, mode, started_at) VALUES (?,?,?,?)",
-                (id, cwd, mode, now_iso()),
+                """
+                INSERT INTO sessions(id, cwd, mode, started_at, ended_at, title, sdk_session_id, last_active,
+                                     model, permission_mode, title_auto)
+                VALUES (?,?,?,?,NULL,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
+                  cwd=excluded.cwd, ended_at=NULL, last_active=excluded.last_active,
+                  model=excluded.model, permission_mode=excluded.permission_mode,
+                  sdk_session_id=COALESCE(excluded.sdk_session_id, sessions.sdk_session_id),
+                  title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
+                  title_auto=excluded.title_auto
+                """,
+                (id, cwd, mode, now, title, sdk_session_id, now, model, permission_mode, int(title_auto)),
             )
             self._conn.commit()
 
-    def end_session(self, id: str) -> None:
+    def update_session(self, id: str, **fields: Any) -> None:
+        cols = {k: v for k, v in fields.items() if k in SESSION_UPDATABLE}
+        if not cols:
+            return
+        if "title_auto" in cols:
+            cols["title_auto"] = int(bool(cols["title_auto"]))
+        assignments = ", ".join(f"{k}=?" for k in cols)
         with self._lock:
-            self._conn.execute("UPDATE sessions SET ended_at=? WHERE id=?", (now_iso(), id))
+            self._conn.execute(f"UPDATE sessions SET {assignments} WHERE id=?", (*cols.values(), id))
             self._conn.commit()
+
+    def end_session(self, id: str) -> None:
+        self.update_session(id, ended_at=now_iso())
+
+    def get_session(self, id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM sessions WHERE id=?", (id,)).fetchone()
+        return dict(row) if row else None
 
     def list_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?", (limit,)
+                "SELECT * FROM sessions ORDER BY COALESCE(last_active, started_at) DESC, rowid DESC LIMIT ?",
+                (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def delete_session(self, id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM messages WHERE session_id=?", (id,))
+            self._conn.execute("DELETE FROM sessions WHERE id=?", (id,))
+            self._conn.commit()
+
+    def count_messages(self, session_id: str) -> int:
+        with self._lock:
+            return int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE session_id=?", (session_id,)
+                ).fetchone()[0]
+            )
 
     # --- messages -------------------------------------------------------
     def add_message(self, session_id: str, role: str, blocks: list[dict[str, Any]]) -> dict[str, Any]:
