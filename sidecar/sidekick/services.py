@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,7 @@ from .state import AppState
 log = logging.getLogger(__name__)
 
 BATTERY_REFRESH_S = 300
+SNOOZE_TICK_S = 20
 
 
 @dataclass
@@ -57,12 +59,22 @@ class Services:
     gestures: Any = None
     clipboard: Callable[[str], None] | None = None
     clipboard_get: Callable[[], str | None] | None = None
+    last_user_input_ts: float = 0.0
     _started: bool = False
 
     @property
     def session(self) -> Any:
         """The active embedded session (or None)."""
         return self.sessions.active if self.sessions is not None else None
+
+    def note_user_input(self) -> None:
+        """Called whenever the user sends something (typed or spoken)."""
+        self.last_user_input_ts = time.time()
+
+    def quiet_now(self) -> bool:
+        """True while the quiet period after the user's own input is running."""
+        quiet = float(self.settings.tts.quiet_after_input_s or 0)
+        return quiet > 0 and (time.time() - self.last_user_input_ts) < quiet
 
     # --- lifecycle -----------------------------------------------------
     async def start(self) -> None:
@@ -177,6 +189,7 @@ class _Background:
         self._tasks.append(spawn(self._warm_stt(), "warm-stt"))
         self._tasks.append(spawn(self._warm_llm(), "warm-llm"))
         self._tasks.append(spawn(self._battery_loop(), "battery"))
+        self._tasks.append(spawn(self._snooze_loop(), "snoozes"))
 
     async def stop(self) -> None:
         for t in self._tasks:
@@ -208,6 +221,17 @@ class _Background:
         ]
         await llm.warm_up(targets)
 
+    async def _snooze_loop(self) -> None:
+        while True:
+            await asyncio.sleep(SNOOZE_TICK_S)
+            try:
+                if self._s.sessions is not None:
+                    self._s.sessions.tick_snoozes()
+                if self._s.hooks is not None:
+                    self._s.hooks.tick_snoozes()
+            except Exception:  # noqa: BLE001
+                log.exception("snooze tick failed")
+
     async def _battery_loop(self) -> None:
         bt = self._s.bluetooth
         if bt is None or not hasattr(bt, "battery"):
@@ -237,6 +261,7 @@ class RoutedDeliverer:
             record = await s.btw.ask(text)
             s.speaker.speak(record["answer"], kind="btw")
             return "btw"
+        s.note_user_input()
         pending = s.session.oldest_pending() if s.session is not None else None
         if pending is not None:
             if pending.kind == "question":
@@ -247,6 +272,11 @@ class RoutedDeliverer:
                 s.session.resolve_permission(
                     pending.id, decision, message=None if decision != "deny" else text
                 )
+            s.sounds.play("ready_to_paste")
+            return "answer"
+        waiting = s.hooks.waiting() if s.hooks is not None else None
+        if waiting is not None and parse_decision(text) == "defer":
+            s.hooks.defer(waiting.session_id, s.settings.claude.defer_minutes)
             s.sounds.play("ready_to_paste")
             return "answer"
         if s.session is not None and s.session.running:
@@ -435,6 +465,12 @@ def build_services(
                 bus.publish(
                     "error", {"module": "audio", "message": f"Audio zurücksetzen fehlgeschlagen: {exc}"}
                 )
+        if name == "became_present":
+            # Deferred prompts wake up as soon as you are back.
+            if services.sessions is not None:
+                services.sessions.wake_all_snoozed()
+            if services.hooks is not None:
+                services.hooks.wake_all_snoozed()
         if name in ("became_present", "became_absent", "glasses_connected", "glasses_disconnected"):
             state.update(presence_manual=False)
         if name == "glasses_disconnected":
@@ -458,6 +494,7 @@ def build_services(
         settings,
         embedded_waiting=lambda: services.sessions.any_pending() if services.sessions else False,
         ignore_session_ids=lambda: services.sessions.sdk_ids() if services.sessions else set(),
+        quiet=services.quiet_now,
     )
     services.hooks = hooks
 
@@ -475,6 +512,9 @@ def build_services(
                     spawn(auto_listen(), "auto-listen")
             return
         sounds.play("done")
+        if services.quiet_now():
+            log.info("quiet period: not reading the summary for %s", session.session_id)
+            return
         summary = await summarizer.summarize(text)
         speaker.speak(_prefix(session) + summary, kind="done")
 

@@ -78,10 +78,29 @@ class SessionManager:
         return [s for s in self.live.values() if s.running]
 
     def any_pending(self) -> bool:
-        return any(s.pending for s in self.live.values())
+        """Attention-relevant: at least one permission that is not deferred."""
+        return any(s.any_pending_active() for s in self.live.values())
+
+    def tick_snoozes(self) -> list[str]:
+        woken: list[str] = []
+        for s in self.live.values():
+            woken.extend(s.tick_snoozes())
+        return woken
+
+    def wake_all_snoozed(self) -> list[str]:
+        woken: list[str] = []
+        for s in self.live.values():
+            woken.extend(s.wake_all())
+        return woken
 
     def sdk_ids(self) -> set[str]:
-        return {s.sdk_session_id for s in self.live.values() if s.sdk_session_id}
+        """Claude Code ids owned by embedded sessions (their hooks are ignored). A terminal
+        session that was adopted keeps its own id: the fork gets a new one on init."""
+        return {
+            s.sdk_session_id
+            for s in self.live.values()
+            if s.sdk_session_id and s.sdk_session_id != s.adopted_from
+        }
 
     def find_pending(self, pending_id: str) -> tuple[EmbeddedSession, PendingPermission] | None:
         for s in self.live.values():
@@ -216,6 +235,28 @@ class SessionManager:
             self.live[session.session_id] = session  # type: ignore[index]
             self.active_id = session.session_id
             self.publish()
+            return session
+
+    async def adopt(self, sdk_session_id: str, cwd: str, title: str | None = None) -> EmbeddedSession:
+        """Continue a terminal session in Sidekick: fork it (new Claude Code session id) so
+        the terminal keeps its own transcript untouched."""
+        if not Path(cwd).is_dir():  # noqa: ASYNC240 - one stat
+            raise ValueError(f"Kein Verzeichnis: {cwd}")
+        async with self._lock:
+            for live in self.live.values():
+                if live.adopted_from == sdk_session_id and live.running:
+                    self.active_id = live.session_id
+                    self.publish()
+                    return live
+            session = self._new(None)
+            session.adopted_from = sdk_session_id
+            await session.start(
+                cwd, resume=sdk_session_id, title=title or f"Terminal: {Path(cwd).name}", fork=True
+            )
+            self.live[session.session_id] = session  # type: ignore[index]
+            self.active_id = session.session_id
+            self.publish()
+            log.info("adopted terminal session %s as %s", sdk_session_id, session.session_id)
             return session
 
     async def resume(self, session_id: str) -> EmbeddedSession:

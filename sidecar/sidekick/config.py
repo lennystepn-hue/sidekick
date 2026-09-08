@@ -57,6 +57,8 @@ class TtsSettings(BaseModel):
     edge_voice: str = "de-DE-ConradNeural"
     language: str = "de"
     summarize_before_speaking: bool = True
+    # After you sent something yourself, "done" announcements are tone-only for this long (0 = off).
+    quiet_after_input_s: float = 0.0
 
 
 class GestureSettings(BaseModel):
@@ -89,6 +91,8 @@ class ClaudeSettings(BaseModel):
     permission_mode: Literal["auto", "acceptEdits", "default", "bypassPermissions"] = "auto"
     cli_path: str = ""
     last_cwd: str = ""
+    # "Später": a deferred permission stays silent for this long, then asks again.
+    defer_minutes: int = 10
 
 
 class BrainstormSettings(BaseModel):

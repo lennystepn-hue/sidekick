@@ -230,7 +230,11 @@ export interface BtwExchange {
 // ---------- Permissions / questions ----------
 
 export type PermissionKind = "permission" | "question";
-export type PermissionDecision = "allow" | "deny" | "allow_always";
+/**
+ * "defer" ("Später") keeps the request pending but silent for `claude.defer_minutes`;
+ * "wake" ends that snooze early. Neither resolves the request.
+ */
+export type PermissionDecision = "allow" | "deny" | "allow_always" | "defer" | "wake";
 
 export interface QuestionOption {
   label: string;
@@ -256,6 +260,8 @@ export interface PermissionRequest {
   questions: Question[] | null;
   tool_use_id: string | null;
   ts: Timestamp;
+  /** Unix seconds until which the request is deferred ("Später"); null (or absent on older sidecars) = not snoozed. */
+  snoozed_until: number | null;
 }
 
 export interface PermissionResolution {
@@ -263,6 +269,10 @@ export interface PermissionResolution {
   answers?: Record<string, string | string[]>;
   message?: string;
 }
+
+/** True while `until` (unix seconds) lies in the future: a request or terminal prompt is deferred. */
+export const isSnoozed = (until: number | null | undefined, now = Date.now()): boolean =>
+  typeof until === "number" && until * 1000 > now;
 
 // ---------- Misc REST payloads ----------
 
@@ -307,17 +317,41 @@ export interface BluetoothHealth {
   instance_id: string | null;
 }
 
+/** A Claude Code session in a terminal, known through the HTTP hooks. */
 export interface ExternalSession {
   session_id: string;
   cwd: string;
+  transcript_path?: string;
   last_event: string;
   last_ts: Timestamp;
   /** Contract says "none"|"waiting_input"; the current sidecar sends a boolean. Both are accepted. */
   attention: Attention | boolean;
   active?: boolean;
+  /** Id of the Sidekick session that took this one over (`POST /sessions/adopt`); null until then. */
+  adopted_by: string | null;
+  /** Unix seconds while the terminal's permission prompt is deferred ("Später"); null otherwise. */
+  snoozed_until: number | null;
+  /** The last prompt Sidekick spoke for this session; "" if none yet. */
+  last_prompt: string;
 }
 
 export const isWaiting = (a: Attention | boolean | undefined): boolean => a === true || a === "waiting_input";
+
+/** `POST /sessions/adopt`: fork the terminal session into a new, already active Sidekick session. */
+export interface AdoptOptions {
+  session_id: string;
+  /** Defaults to the terminal session's cwd. */
+  cwd?: string;
+  /** Defaults to "Terminal: <folder>". */
+  title?: string;
+}
+
+/** `POST /sessions/external/{id}/defer` */
+export interface DeferResponse {
+  ok: boolean;
+  /** Unix seconds; the prompt stays quiet until then. */
+  until: number;
+}
 
 export type HookScope = "project" | "local" | "user";
 
@@ -394,6 +428,8 @@ export interface TtsSettings {
   edge_voice: string;
   language: string;
   summarize_before_speaking: boolean;
+  /** Seconds after your own input during which "done" only plays the tone; 0 = off. Questions are always spoken. */
+  quiet_after_input_s: number;
 }
 export interface GestureSettings {
   single_tap: GestureAction;
@@ -420,6 +456,8 @@ export interface ClaudeSettings {
   permission_mode: "auto" | "acceptEdits" | "default" | "bypassPermissions";
   cli_path: string;
   last_cwd: string;
+  /** How long a deferred ("Später") permission stays quiet before it announces itself again. */
+  defer_minutes: number;
 }
 
 export interface BrainstormSettings {
@@ -470,6 +508,17 @@ export interface PermissionResolved {
   id: string;
   decision: PermissionDecision;
 }
+/** A pending request was deferred; it stays in the list, quiet until `until` (unix seconds). */
+export interface PermissionDeferred {
+  id: string;
+  session_id: string;
+  until: number;
+}
+/** The snooze ended (expired, "Jetzt entscheiden", or the user came back). */
+export interface PermissionWoken {
+  id: string;
+  session_id: string;
+}
 export interface SpokenEvent {
   text: string;
   kind: string;
@@ -508,6 +557,8 @@ export type WsEvent =
   | WsBase<"message", Message>
   | WsBase<"permission_request", PermissionRequest>
   | WsBase<"permission_resolved", PermissionResolved>
+  | WsBase<"permission_deferred", PermissionDeferred>
+  | WsBase<"permission_woken", PermissionWoken>
   | WsBase<"btw_answer", BtwExchange>
   | WsBase<"spoken", SpokenEvent>
   | WsBase<"hook_event", HookEvent>

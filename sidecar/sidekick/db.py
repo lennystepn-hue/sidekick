@@ -126,8 +126,17 @@ class Database:
                   title_auto=excluded.title_auto, kind=excluded.kind
                 """,
                 (
-                    id, cwd, mode, now, title, sdk_session_id, now, model, permission_mode,
-                    int(title_auto), kind,
+                    id,
+                    cwd,
+                    mode,
+                    now,
+                    title,
+                    sdk_session_id,
+                    now,
+                    model,
+                    permission_mode,
+                    int(title_auto),
+                    kind,
                 ),
             )
             self._conn.commit()

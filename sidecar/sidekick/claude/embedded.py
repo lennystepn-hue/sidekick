@@ -45,9 +45,15 @@ class PendingPermission:
     tool_use_id: str | None
     future: asyncio.Future = field(repr=False)
     ts: float = field(default_factory=time.time)
+    snoozed_until: float | None = None
+
+    @property
+    def snoozed(self) -> bool:
+        return self.snoozed_until is not None and self.snoozed_until > time.time()
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "snoozed_until": self.snoozed_until,
             "id": self.id,
             "session_id": self.session_id,
             "kind": self.kind,
@@ -145,6 +151,7 @@ class EmbeddedSession:
         self.kind: str = "code"
         self.idea: IdeaState | None = None
         self.project_path: str | None = None
+        self.adopted_from: str | None = None  # terminal session id this one was forked from
         self._last_assistant_text = ""
         self._stream_message_id: str | None = None
         self._stream_filter: StreamFilter | None = None
@@ -197,6 +204,7 @@ class EmbeddedSession:
             setting_sources=list(SETTING_SOURCES),
             cli_path=cfg.cli_path or None,
             resume=resume or None,
+            fork_session=bool(resume) and getattr(self, "_fork", False),
             stderr=cli_stderr,
         )
 
@@ -267,9 +275,11 @@ class EmbeddedSession:
         kind: str = "code",
         project_path: str | None = None,
         idea: IdeaState | None = None,
+        fork: bool = False,
     ) -> SessionInfo:
         if self._client is not None:
             await self.stop()
+        self._fork = fork
         self.session_id = self.session_id or new_id()
         self.sdk_session_id = resume
         self.cwd = cwd
@@ -471,18 +481,70 @@ class EmbeddedSession:
         answers: dict[str, Any] | None = None,
         message: str | None = None,
     ) -> bool:
-        if decision not in ("allow", "deny", "allow_always"):
-            raise ValueError("decision must be allow, deny or allow_always")
+        if decision not in ("allow", "deny", "allow_always", "defer", "wake"):
+            raise ValueError("decision must be allow, deny, allow_always, defer or wake")
         pending = self.pending.get(pending_id)
         if pending is None or pending.future.done():
             return False
+        if decision == "defer":
+            minutes = max(1, int(self._settings().claude.defer_minutes))
+            pending.snoozed_until = time.time() + 60 * minutes
+            self._clear_attention()
+            self._notify()
+            self._bus.publish(
+                "permission_deferred",
+                {"id": pending.id, "session_id": self.session_id, "until": pending.snoozed_until},
+            )
+            log.info("permission %s deferred for %d min", pending.id, minutes)
+            return True
+        if decision == "wake":
+            self._wake(pending, announce=False)
+            return True
         pending.future.set_result((decision, answers, message))
         return True
 
+    def _wake(self, pending: PendingPermission, announce: bool) -> None:
+        pending.snoozed_until = None
+        self._state.update(attention="waiting_input")
+        self._notify()
+        self._bus.publish("permission_woken", {"id": pending.id, "session_id": self.session_id})
+        if announce and self._on_needs_input is not None:
+            asyncio.ensure_future(self._announce(pending))
+
+    async def _announce(self, pending: PendingPermission) -> None:
+        try:
+            result = self._on_needs_input(pending)  # type: ignore[misc]
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:  # noqa: BLE001
+            log.exception("re-announce failed")
+
+    def tick_snoozes(self, now: float | None = None) -> list[str]:
+        """Wake deferred permissions whose snooze ran out; returns their ids."""
+        now = time.time() if now is None else now
+        woken: list[str] = []
+        for pending in list(self.pending.values()):
+            if (
+                pending.snoozed_until is not None
+                and pending.snoozed_until <= now
+                and not pending.future.done()
+            ):
+                self._wake(pending, announce=True)
+                woken.append(pending.id)
+        return woken
+
+    def wake_all(self) -> list[str]:
+        return self.tick_snoozes(now=float("inf"))
+
+    def any_pending_active(self) -> bool:
+        return any(not p.snoozed for p in self.pending.values())
+
     def oldest_pending(self) -> PendingPermission | None:
-        if not self.pending:
+        """The oldest request that is not snoozed (a spoken "ja" never hits a deferred one)."""
+        candidates = [p for p in self.pending.values() if not p.snoozed]
+        if not candidates:
             return None
-        return min(self.pending.values(), key=lambda p: p.ts)
+        return min(candidates, key=lambda p: p.ts)
 
     # --- reading -------------------------------------------------------
     async def _read_loop(self) -> None:

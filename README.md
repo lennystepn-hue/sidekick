@@ -142,7 +142,7 @@ The gesture tester in Settings shows every raw media event, so you can find out 
 
 ### Voice answers
 
-When Claude asks for permission, "yes", "no" and "always" (in German or English) resolve it. For multiple-choice questions, name the option or its position. Anything else is sent as text, which is how you answer free-form questions.
+When Claude asks for permission, "yes", "no" and "always" (in German or English) resolve it, and "später" ("later", "not now") defers it: the request goes quiet for `claude.defer_minutes` (10 by default) and asks again afterwards, or as soon as you are back at the machine. Deferred requests never catch a stray "yes" meant for something else. For multiple-choice questions, name the option or its position. Anything else is sent as text, which is how you answer free-form questions.
 
 ### Sessions
 
@@ -152,7 +152,7 @@ Permission mode defaults to Claude Code's **auto** mode (Claude decides, asks on
 
 ### Terminal sessions
 
-Settings → Hooks → pick a project → Install. That writes six HTTP hooks (`Stop`, `Notification`, `PermissionRequest`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`) into the chosen `settings.json`, pointing at `http://127.0.0.1:47821/hook/<Event>`. Existing hooks are left alone; uninstall removes only Sidekick's. From then on your terminal sessions announce completions and questions on the glasses. Spoken text for those sessions lands in the clipboard (optionally typed straight into the terminal via SendInput). The JSON is shown in the UI if you prefer pasting it yourself.
+Settings → Hooks → pick a project → Install. That writes six HTTP hooks (`Stop`, `Notification`, `PermissionRequest`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`) into the chosen `settings.json`, pointing at `http://127.0.0.1:47821/hook/<Event>`. Existing hooks are left alone; uninstall removes only Sidekick's. From then on your terminal sessions announce completions and questions on the glasses, and they appear in a "Terminal" group in the sidebar. **Übernehmen** forks such a session into Sidekick (new Claude Code session id, full history; the terminal keeps its own transcript and goes quiet until you type there again), **Später** defers its open permission prompt. Spoken text for those sessions lands in the clipboard (optionally typed straight into the terminal via SendInput). The JSON is shown in the UI if you prefer pasting it yourself.
 
 ### Audio and presence
 
@@ -166,9 +166,9 @@ The glasses are a normal Bluetooth headset to Windows: A2DP for good playback, H
 |---|---|
 | `audio` | device name to look for, restore the previous output device, tone volume |
 | `stt` | engine (`parakeet` by default, or `faster-whisper`; Parakeet TDT 0.6B v3 int8 is about ten times faster on the CPU and downloads 670 MB on first use), Whisper model, silence and max duration, languages, hotwords (Parakeet has no hotwords, so the cleanup gets them as known terms), review delay, cleanup on/off |
-| `tts` | `elevenlabs` or `edge`, voice, summarize before speaking |
+| `tts` | `elevenlabs` or `edge`, voice, summarize before speaking, `quiet_after_input_s` (after your own input, "done" is tone-only for this long; questions are always read) |
 | `gestures` | mapping of single/double/triple/hold, capture media keys |
-| `claude` | models for cleanup, summary and btw, permission mode, CLI path |
+| `claude` | models for cleanup, summary and btw, permission mode, CLI path, `defer_minutes` for "später" |
 | `brainstorm` | partner and docs model (Opus 5), speak replies, auto-listen after a reply, thinking |
 | `projects` | base folder for created projects (`~/Projects`), git init, start session after create |
 | `delivery` | clipboard and SendInput for terminal sessions |
@@ -185,7 +185,7 @@ Warm, tinted neutrals with an amber accent; Bricolage Grotesque for titles, Inst
 Next up, in this order (plan: [`docs/superpowers/plans/2026-09-08-next-features.md`](docs/superpowers/plans/2026-09-08-next-features.md)):
 
 1. ~~**Parakeet TDT 0.6B v3** as the local speech engine~~ done: select "Parakeet" under Settings → Sprache.
-2. **Adopt terminal sessions** into Sidekick with one click (we know their ids from the hooks), a "later" answer for permissions, and a quiet period after your own input.
+2. ~~**Adopt terminal sessions**, a "later" answer for permissions, a quiet period after your own input~~ done: "Übernehmen" and "Später" in the Terminal group, `quiet_after_input_s` in Settings → Sprachausgabe.
 3. **A Sidekick channel** for Claude Code's channels preview: push voice straight into terminal sessions and relay their permission prompts to the glasses, plus a launcher for terminal sessions with Remote Control so the phone can steer what the glasses announce.
 
 Ideas that did not make the cut, and why, are in [`docs/superpowers/specs/2026-09-07-sidekick-design.md`](docs/superpowers/specs/2026-09-07-sidekick-design.md).

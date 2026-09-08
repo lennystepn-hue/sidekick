@@ -53,8 +53,19 @@ NO = {
     "denied",
     "niemals",
     "never",
-    "warte",
 }
+DEFER_PHRASES = (
+    "später",
+    "spaeter",
+    "nachher",
+    "gleich",
+    "warte",
+    "warten",
+    "later",
+    "not now",
+    "nicht jetzt",
+    "jetzt nicht",
+)
 ALWAYS_PHRASES = (
     "immer",
     "always",
@@ -111,7 +122,7 @@ def tokens(text: str) -> list[str]:
 
 
 def parse_decision(text: str) -> str | None:
-    """Return "allow", "deny", "allow_always" or None (treat as free text).
+    """Return "allow", "deny", "allow_always", "defer" or None (treat as free text).
 
     A decision is recognised when the utterance starts with a yes/no word, or is very
     short and contains one. Longer sentences are content, not decisions.
@@ -120,6 +131,8 @@ def parse_decision(text: str) -> str | None:
     toks = tokens(text)
     if not toks or len(toks) > MAX_DECISION_WORDS:
         return None
+    if len(toks) <= 4 and any(p in norm for p in DEFER_PHRASES):
+        return "defer"
     if any(p in norm for p in ALWAYS_PHRASES):
         return "deny" if toks[0] in NO and "nicht mehr fragen" not in norm else "allow_always"
     if toks[0] in NO:

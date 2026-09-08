@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import type { PermissionRequest, Question } from "../api/types";
+import { isSnoozed, type PermissionDecision, type PermissionRequest, type Question } from "../api/types";
+import { useNow } from "../composables/now";
 import { useAppStore } from "../stores/app";
 import { fmtTime } from "../utils/format";
+import SnoozeNote from "./SnoozeNote.vue";
 
 const props = defineProps<{ request: PermissionRequest }>();
 const app = useAppStore();
 
+const now = useNow(15_000);
 const questions = computed<Question[]>(() => props.request.questions ?? []);
 const selected = reactive<Record<string, string[]>>({});
 const freetext = reactive<Record<string, string>>({});
 const busy = ref(false);
+/** Deferred ("Später", also by voice): the card stays but loses the warm edge until the snooze ends. */
+const snoozed = computed(() => isSnoozed(props.request.snoozed_until, now.value));
+const attentive = computed(() => !busy.value && !snoozed.value);
 
 function isSelected(q: Question, label: string): boolean {
   return (selected[q.question] ?? []).includes(label);
@@ -46,12 +52,19 @@ async function deny(): Promise<void> {
   await app.resolvePermission(props.request.id, "deny", { message: "Vom Nutzer abgebrochen" });
   busy.value = false;
 }
+/** "defer" and "wake" leave the question open; only the snooze changes. */
+async function snooze(decision: Extract<PermissionDecision, "defer" | "wake">): Promise<void> {
+  if (busy.value) return;
+  busy.value = true;
+  await app.resolvePermission(props.request.id, decision);
+  busy.value = false;
+}
 </script>
 
 <template>
-  <section class="card" :class="{ waiting: !busy }" aria-live="polite">
+  <section class="card" :class="{ waiting: attentive, snoozed }" aria-live="polite">
     <header class="head">
-      <span class="dot warn" :class="{ pulse: !busy }"></span>
+      <span class="dot" :class="{ warn: !snoozed, pulse: attentive }"></span>
       <h3 class="heading display">Claude hat eine Frage</h3>
       <span class="spacer"></span>
       <time class="muted ts">{{ fmtTime(request.ts) }}</time>
@@ -89,9 +102,20 @@ async function deny(): Promise<void> {
       />
     </div>
 
+    <SnoozeNote
+      v-if="snoozed && request.snoozed_until"
+      :until="request.snoozed_until"
+      label="Jetzt entscheiden"
+      :busy="busy"
+      @wake="snooze('wake')"
+    />
+
     <footer class="actions">
       <button class="btn btn-primary" :disabled="!complete || busy" @click="submit">Antworten</button>
       <button class="btn btn-danger" :disabled="busy" @click="deny">Ablehnen</button>
+      <button v-if="!snoozed" class="btn btn-ghost later" :disabled="busy" title="Erinnert in ein paar Minuten wieder" @click="snooze('defer')">
+        Später
+      </button>
       <span v-if="busy" class="muted sending">Sende…</span>
     </footer>
   </section>
@@ -114,6 +138,9 @@ async function deny(): Promise<void> {
 .card.waiting {
   border-color: var(--warn-edge);
   box-shadow: 0 0 26px -8px color-mix(in oklch, var(--warn) 50%, transparent);
+}
+.card.snoozed .heading {
+  color: var(--text-2);
 }
 .head {
   display: flex;
@@ -199,8 +226,12 @@ async function deny(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .sending {
   font-size: var(--fs-xs);
+}
+.later {
+  margin-left: auto;
 }
 </style>
