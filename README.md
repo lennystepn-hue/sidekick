@@ -39,6 +39,14 @@ Nur der Sidecar: `cd sidecar && uv run python -m sidekick` (mit `--fake` simulie
 
 Tests: `cd sidecar && uv run pytest -q` (89 Tests, ohne Hardware, ohne Netz) und `pnpm typecheck`.
 
+## Als App auf dem Desktop
+
+```powershell
+pwsh scripts/install-portable.ps1
+```
+
+Baut Release-EXE und gepackten Sidecar, kopiert beides nach `%LOCALAPPDATA%\Programs\Sidekick` und legt zwei Verknüpfungen auf den Desktop: "Sidekick" startet die App (ein zweiter Klick holt nur das laufende Fenster nach vorn), "Sidekick neu starten" beendet alle laufenden Sidekick-Instanzen samt Sidecar und startet frisch. Nach Codeänderungen das Skript erneut ausführen (`-SkipSidecar` oder `-SkipBuild`, wenn sich nur eine Seite geändert hat).
+
 ## Release-Build
 
 ```powershell
