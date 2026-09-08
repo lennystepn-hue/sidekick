@@ -3,11 +3,13 @@
  * Base URL: http://127.0.0.1:47821, overridable via VITE_SIDECAR_URL.
  */
 import type {
+  AdoptOptions,
   AppState,
   AudioDevice,
   BluetoothHealth,
   BrainstormInfo,
   BtwExchange,
+  DeferResponse,
   ExternalSession,
   GestureLogEntry,
   GlassesInfo,
@@ -155,10 +157,23 @@ export const api = {
   sessionStop: () => request<{ ok: boolean }>("POST", "/session/stop"),
   sessionInterrupt: () => request<{ ok: boolean }>("POST", "/session/interrupt"),
   sessionSend: (text: string) => request<{ ok: boolean }>("POST", "/session/send", { text }),
+  /** `decision: "defer"` answers with `until` (unix seconds) when the sidecar knows it; the WS event carries it too. */
   sessionPermission: (id: string, resolution: PermissionResolution) =>
-    request<{ ok: boolean }>("POST", `/session/permission/${id}`, resolution),
+    request<{ ok: boolean; until?: number | null }>("POST", `/session/permission/${id}`, resolution),
   sessionMessages: (limit = 200) => request<Message[]>("GET", `/session/messages${q({ limit })}`),
+
+  // terminal sessions (known through the hooks)
   externalSessions: () => request<ExternalSession[]>("GET", "/sessions/external"),
+  /** Forks the terminal session into a new Sidekick session that is already active. Empty strings are not sent. */
+  sessionAdopt: (o: AdoptOptions) =>
+    request<SessionSummary>("POST", "/sessions/adopt", {
+      session_id: o.session_id,
+      ...(o.cwd ? { cwd: o.cwd } : {}),
+      ...(o.title ? { title: o.title } : {}),
+    }),
+  externalDefer: (id: string) =>
+    request<DeferResponse>("POST", `/sessions/external/${encodeURIComponent(id)}/defer`),
+  externalWake: (id: string) => request<{ ok: boolean }>("POST", `/sessions/external/${encodeURIComponent(id)}/wake`),
 
   // sessions (multiple concurrent embedded sessions; `/session/*` above acts on the active one)
   sessions: () => request<SessionSummary[]>("GET", "/sessions"),
