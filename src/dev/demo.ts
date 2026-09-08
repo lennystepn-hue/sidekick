@@ -3,20 +3,22 @@
  * data and simulates a few interactions by feeding events through the store's WS handler.
  */
 import { ApiError, configureTransport, type HttpMethod } from "../api/client";
-import type {
-  AppState,
-  AudioDevice,
-  BtwExchange,
-  ExternalSession,
-  GestureLogEntry,
-  IdeaState,
-  MaterializeJob,
-  Message,
-  PermissionRequest,
-  SessionSummary,
-  Settings,
-  Transcript,
-  WsEvent,
+import {
+  isSnoozed,
+  isWaiting,
+  type AppState,
+  type AudioDevice,
+  type BtwExchange,
+  type ExternalSession,
+  type GestureLogEntry,
+  type IdeaState,
+  type MaterializeJob,
+  type Message,
+  type PermissionRequest,
+  type SessionSummary,
+  type Settings,
+  type Transcript,
+  type WsEvent,
 } from "../api/types";
 import type { AppStore } from "../stores/app";
 import { deepMerge, type SettingsStore } from "../stores/settings";
@@ -126,7 +128,7 @@ const state: AppState = {
     stt_downloading: false,
     stt_progress: 0,
   },
-  external_sessions: 1,
+  external_sessions: 2,
 };
 
 const settings: Settings = {
@@ -154,6 +156,7 @@ const settings: Settings = {
     edge_voice: "de-DE-ConradNeural",
     language: "de",
     summarize_before_speaking: true,
+    quiet_after_input_s: 0,
   },
   gestures: { single_tap: "toggle_listen", double_tap: "repeat_last", triple_tap: "btw", hold: "btw", capture_media_keys: true, capture_always: false },
   delivery: { send_input: false, clipboard: true },
@@ -167,6 +170,7 @@ const settings: Settings = {
     permission_mode: "auto",
     cli_path: "",
     last_cwd: CWD,
+    defer_minutes: 10,
   },
   brainstorm: { model: "claude-opus-5", docs_model: "claude-opus-5", speak_replies: true, auto_listen: false },
   projects: { base_dir: PROJECTS_DIR, git_init: true, start_session_after_create: true },
@@ -330,6 +334,7 @@ const pending: PermissionRequest[] = [
     questions: null,
     tool_use_id: "toolu_demo_bash",
     ts: Date.now() / 1000 - 20,
+    snoozed_until: null,
   },
   {
     id: "q_1",
@@ -364,6 +369,7 @@ const pending: PermissionRequest[] = [
     ],
     tool_use_id: "toolu_demo_ask",
     ts: Date.now() / 1000 - 15,
+    snoozed_until: null,
   },
 ];
 
@@ -434,8 +440,35 @@ const gestureLog: GestureLogEntry[] = [
   { ts: Date.now() / 1000 - 300, key: "stop", swallowed: false, gesture: "hold", action: "btw" },
 ];
 
+/** Terminal sessions known through the hooks: one waiting for a permission (with the spoken prompt), one idle. */
+const TERM_CWD = "C:\\Users\\dev\\Projects\\api-gateway";
+const TERM_IDLE_CWD = "C:\\Users\\dev\\Projects\\dotfiles";
+const TERM_COMMAND = "docker compose up -d";
 const externalSessions: ExternalSession[] = [
-  { session_id: "ext_1", cwd: BLOG_CWD, last_event: "Stop", last_ts: iso(120), attention: "none" },
+  {
+    session_id: "ext_1",
+    cwd: TERM_CWD,
+    transcript_path: "C:\\Users\\dev\\.claude\\projects\\C--Users-dev-Projects-api-gateway\\ext_1.jsonl",
+    last_event: "PermissionRequest",
+    last_ts: Date.now() / 1000 - 40,
+    attention: true,
+    active: true,
+    adopted_by: null,
+    snoozed_until: null,
+    last_prompt: `api-gateway: Claude möchte einen Befehl ausführen: ${TERM_COMMAND}. Erlauben?`,
+  },
+  {
+    session_id: "ext_2",
+    cwd: TERM_IDLE_CWD,
+    transcript_path: "C:\\Users\\dev\\.claude\\projects\\C--Users-dev-Projects-dotfiles\\ext_2.jsonl",
+    last_event: "Stop",
+    last_ts: Date.now() / 1000 - 1900,
+    attention: false,
+    active: true,
+    adopted_by: null,
+    snoozed_until: null,
+    last_prompt: "",
+  },
 ];
 
 const devices: AudioDevice[] = [
@@ -468,7 +501,14 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     activeId = active?.id ?? null;
     state.active_session_id = activeId;
     state.session = active ? { ...active } : null;
-    state.attention = sessions.some((s) => s.pending > 0 && s.status !== "stopped") ? "waiting_input" : "none";
+    // Like the sidecar: snoozed requests and adopted / snoozed terminals do not ask for attention.
+    const open = (s: SessionSummary): boolean =>
+      pending.some((p) => pendingIds.has(p.id) && p.session_id === s.id && !isSnoozed(p.snoozed_until));
+    const terminalWaits = externalSessions.some(
+      (e) => e.active !== false && !e.adopted_by && isWaiting(e.attention) && !isSnoozed(e.snoozed_until),
+    );
+    state.attention = sessions.some((s) => s.status !== "stopped" && open(s)) || terminalWaits ? "waiting_input" : "none";
+    state.external_sessions = externalSessions.length;
   }
   const pushState = (patch: Partial<AppState> = {}): void => {
     Object.assign(state, patch);
@@ -597,6 +637,35 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     pushState();
   }
 
+  // ----- "Später" and adoption, as the sidecar would do them -----
+  const snoozeUntil = (): number => Math.floor(Date.now() / 1000 + Math.max(1, current.claude.defer_minutes || 10) * 60);
+  /** The sidecar's ticker: when a snooze runs out, the prompt announces itself again. */
+  function scheduleWake(until: number, fn: () => void): void {
+    window.setTimeout(fn, Math.max(0, until * 1000 - Date.now()) + 500);
+  }
+  /** A fork of the terminal session becomes a new, active code session; the terminal row points at it. */
+  function adoptExternal(e: ExternalSession, b: Record<string, unknown>): SessionSummary {
+    const cwd = typeof b.cwd === "string" && b.cwd.trim() ? b.cwd : e.cwd;
+    const title = typeof b.title === "string" && b.title.trim() ? b.title : `Terminal: ${basename(e.cwd)}`;
+    const s = find(createSession(cwd, undefined, title).id)!;
+    s.sdk_session_id = `sdk_fork_${e.session_id}`;
+    s.resumable = true;
+    // The fork carries the terminal's conversation; the demo seeds the part that led to the prompt.
+    const history: Message[] = e.last_prompt
+      ? [
+          msg(nextId++, "user", 300, [{ type: "text", text: "Starte die Container neu und prüf, ob der Healthcheck vom Gateway grün wird." }], s.id),
+          msg(nextId++, "assistant", 40, [{ type: "text", text: `Ich würde jetzt \`${TERM_COMMAND}\` ausführen und danach den Healthcheck abfragen. Sag kurz Bescheid, dann leg ich los.` }], s.id),
+        ]
+      : [msg(nextId++, "assistant", 60, [{ type: "text", text: `Weiter geht es hier in Sidekick; die Unterhaltung aus dem Terminal in ${basename(e.cwd)} ist übernommen.` }], s.id)];
+    messagesBy[s.id] = history;
+    s.message_count = history.length;
+    e.adopted_by = s.id;
+    e.snoozed_until = null;
+    emit("hook_event", { event: "adopt", session_id: e.session_id, cwd: e.cwd, summary: `übernommen in ${title}` });
+    pushState();
+    return clone(s);
+  }
+
   configureTransport((method: HttpMethod, fullPath: string, body?: unknown) => {
     const path = fullPath.split("?")[0] ?? fullPath;
     const b = (body ?? {}) as Record<string, unknown>;
@@ -616,7 +685,7 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
         case "/secrets":
           return Promise.resolve({ elevenlabs: true, deepgram: false });
         case "/session":
-          return Promise.resolve({ session: clone(state.session), pending: pending.filter((p) => pendingIds.has(p.id)) });
+          return Promise.resolve({ session: clone(state.session), pending: clone(pending.filter((p) => pendingIds.has(p.id))) });
         case "/session/messages":
           return Promise.resolve(clone((activeId && messagesBy[activeId]) || []));
         case "/transcripts":
@@ -624,7 +693,7 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
         case "/btw":
           return Promise.resolve(btw);
         case "/sessions/external":
-          return Promise.resolve(externalSessions);
+          return Promise.resolve(clone(externalSessions));
         case "/audio/devices":
           return Promise.resolve(devices);
         case "/gestures/log":
@@ -669,6 +738,33 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
       return sleep(300).then(() => clone(code));
     }
     if (method === "POST" && path === "/projects/open") return sleep(120).then(() => ({ ok: true }));
+
+    // ----- terminal sessions: adopt, defer, wake -----
+    if (method === "POST" && path === "/sessions/adopt") {
+      const e = externalSessions.find((x) => x.session_id === b.session_id);
+      if (!e) return Promise.reject(new ApiError("Terminal-Session nicht gefunden", 404, path));
+      return sleep(700).then(() => adoptExternal(e, b));
+    }
+    const ext = path.match(/^\/sessions\/external\/([^/]+)\/(defer|wake)$/);
+    if (method === "POST" && ext) {
+      const e = externalSessions.find((x) => x.session_id === decodeURIComponent(ext[1]!));
+      if (!e) return Promise.reject(new ApiError("Terminal-Session nicht gefunden", 404, path));
+      if (ext[2] === "defer") {
+        const until = snoozeUntil();
+        e.snoozed_until = until;
+        scheduleWake(until, () => {
+          if (e.snoozed_until !== until) return;
+          e.snoozed_until = null;
+          pushState();
+          emit("hook_event", { event: "Notification", session_id: e.session_id, cwd: e.cwd, summary: e.last_prompt });
+        });
+        pushState();
+        return sleep(120).then(() => ({ ok: true, until }));
+      }
+      e.snoozed_until = null;
+      pushState();
+      return sleep(80).then(() => ({ ok: true }));
+    }
 
     // ----- multi-session routes -----
     if (method === "POST" && path === "/sessions") {
@@ -777,9 +873,31 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     if (perm) {
       const id = perm[1]!;
       const req = pending.find((p) => p.id === id);
+      const decision = String(b.decision);
+      // "Später" / "Jetzt entscheiden": the request stays pending, only its snooze changes.
+      if (decision === "defer" || decision === "wake") {
+        if (!req || !pendingIds.has(id)) return Promise.reject(new ApiError("Anfrage nicht gefunden", 404, path));
+        if (decision === "defer") {
+          const until = snoozeUntil();
+          req.snoozed_until = until;
+          emit("permission_deferred", { id, session_id: req.session_id, until });
+          scheduleWake(until, () => {
+            if (req.snoozed_until !== until || !pendingIds.has(id)) return;
+            req.snoozed_until = null;
+            emit("permission_woken", { id, session_id: req.session_id });
+            pushState();
+          });
+          pushState();
+          return sleep(120).then(() => ({ ok: true, until }));
+        }
+        req.snoozed_until = null;
+        emit("permission_woken", { id, session_id: req.session_id });
+        pushState();
+        return sleep(80).then(() => ({ ok: true }));
+      }
       pendingIds.delete(id);
       pendingIds = new Set(pendingIds);
-      emit("permission_resolved", { id, decision: String(b.decision) as "allow" });
+      emit("permission_resolved", { id, decision: decision as "allow" });
       const s = req ? find(req.session_id) : undefined;
       if (s && pendingFor(s.id) === 0 && s.status === "waiting") {
         s.status = "running";

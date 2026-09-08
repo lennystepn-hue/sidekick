@@ -1,20 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed } from "vue";
+import { useNow } from "../composables/now";
 import { useAppStore } from "../stores/app";
 import SessionItem from "./SessionItem.vue";
+import TerminalSessions from "./TerminalSessions.vue";
 
 const emit = defineEmits<{ (e: "close"): void; (e: "new"): void; (e: "brainstorm"): void }>();
 const app = useAppStore();
 
-/** Shared clock for the relative timestamps; one interval for the whole list. */
-const now = ref(Date.now());
-let timer: number | null = null;
-onMounted(() => {
-  timer = window.setInterval(() => (now.value = Date.now()), 30_000);
-});
-onBeforeUnmount(() => {
-  if (timer !== null) window.clearInterval(timer);
-});
+/** Shared clock for the relative timestamps and snooze checks; one interval for the whole sidebar. */
+const now = useNow(30_000);
 
 const sessions = computed(() => app.sessions);
 const openRequests = computed(() =>
@@ -66,6 +61,9 @@ const openRequests = computed(() =>
       <p class="headline display">Noch keine Session.</p>
       <p class="muted">„Session“ öffnet einen Projektordner, „Brainstorm“ legt direkt los.</p>
     </div>
+
+    <!-- Terminal sessions (hooks) sit below the Sidekick sessions, only while there are any. -->
+    <TerminalSessions v-if="app.externalSessions.length" :now="now" />
   </aside>
 </template>
 
@@ -159,6 +157,7 @@ const openRequests = computed(() =>
   gap: 2px;
 }
 .empty {
+  flex: 1;
   padding: 28px 18px;
   font-size: var(--fs-sm);
 }

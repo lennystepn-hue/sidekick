@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { PermissionDecision, PermissionRequest } from "../api/types";
+import { isSnoozed, type PermissionDecision, type PermissionRequest } from "../api/types";
+import { useNow } from "../composables/now";
 import { useAppStore } from "../stores/app";
 import { fmtTime, prettyJson, toolSummary } from "../utils/format";
+import SnoozeNote from "./SnoozeNote.vue";
 
 const props = defineProps<{ request: PermissionRequest }>();
 const app = useAppStore();
 
+const now = useNow(15_000);
 const busy = ref<PermissionDecision | null>(null);
+/** Deferred ("Später"): the card stays, but without the warm edge, until the snooze runs out or is ended. */
+const snoozed = computed(() => isSnoozed(props.request.snoozed_until, now.value));
+const attentive = computed(() => busy.value === null && !snoozed.value);
 const summary = computed(() => toolSummary(props.request.tool_name, props.request.input));
 const inputJson = computed(() => prettyJson(props.request.input));
 const hasSuggestions = computed(() => Array.isArray(props.request.suggestions) && props.request.suggestions.length > 0);
@@ -21,9 +27,9 @@ async function decide(decision: PermissionDecision): Promise<void> {
 </script>
 
 <template>
-  <section class="card" :class="{ waiting: busy === null }" aria-live="polite">
+  <section class="card" :class="{ waiting: attentive, snoozed }" aria-live="polite">
     <header class="head">
-      <span class="dot warn" :class="{ pulse: busy === null }"></span>
+      <span class="dot" :class="{ warn: !snoozed, pulse: attentive }"></span>
       <h3 class="heading display">Freigabe erforderlich</h3>
       <span class="tool mono">{{ request.tool_name }}</span>
       <span class="spacer"></span>
@@ -39,6 +45,14 @@ async function decide(decision: PermissionDecision): Promise<void> {
       <pre class="code">{{ inputJson }}</pre>
     </details>
 
+    <SnoozeNote
+      v-if="snoozed && request.snoozed_until"
+      :until="request.snoozed_until"
+      label="Jetzt entscheiden"
+      :busy="busy !== null"
+      @wake="decide('wake')"
+    />
+
     <footer class="actions">
       <button class="btn btn-primary" :disabled="busy !== null" @click="decide('allow')">Erlauben</button>
       <button
@@ -50,7 +64,16 @@ async function decide(decision: PermissionDecision): Promise<void> {
         Immer erlauben
       </button>
       <button class="btn btn-danger" :disabled="busy !== null" @click="decide('deny')">Ablehnen</button>
-      <span v-if="busy" class="muted sending">Sende…</span>
+      <button
+        v-if="!snoozed"
+        class="btn btn-ghost later"
+        :disabled="busy !== null"
+        title="Erinnert in ein paar Minuten wieder"
+        @click="decide('defer')"
+      >
+        Später
+      </button>
+      <span v-if="busy" class="muted sending">{{ busy === "defer" ? "Stelle zurück…" : "Sende…" }}</span>
     </footer>
   </section>
 </template>
@@ -73,6 +96,13 @@ async function decide(decision: PermissionDecision): Promise<void> {
 .card.waiting {
   border-color: var(--warn-edge);
   box-shadow: 0 0 26px -8px color-mix(in oklch, var(--warn) 50%, transparent);
+}
+/* Snoozed: same card, quieter voice. */
+.card.snoozed .heading {
+  color: var(--text-2);
+}
+.card.snoozed .tool {
+  color: var(--muted);
 }
 .head {
   display: flex;
@@ -124,5 +154,8 @@ async function decide(decision: PermissionDecision): Promise<void> {
 }
 .sending {
   font-size: var(--fs-xs);
+}
+.later {
+  margin-left: auto;
 }
 </style>
