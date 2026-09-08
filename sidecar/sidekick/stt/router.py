@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -75,7 +76,23 @@ class SttRouter:
                 hook(old, new)
         if old.stt.engine != new.stt.engine:
             log.info("stt engine switched %s -> %s", old.stt.engine, new.stt.engine)
+            self._schedule_preload()
         self._publish()
+
+    def _schedule_preload(self) -> None:
+        """Warm the newly selected engine right away instead of on the first tap."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._preload_quietly(), name="stt-preload")
+
+    async def _preload_quietly(self) -> None:
+        try:
+            await self.preload()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("stt preload after engine switch failed: %s", exc)
+            self._publish()
 
     async def transcribe(self, audio: np.ndarray, hotwords: list[str] | None = None) -> str:
         engine = self.current()

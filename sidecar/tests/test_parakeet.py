@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -131,9 +132,17 @@ async def test_router_selects_engine_and_reports_state():
     router = SttRouter({"faster-whisper": whisper, "parakeet": parakeet}, lambda: cfg["s"], state)
     assert state.data.models.stt_engine == "faster-whisper" and state.data.models.stt_model == "small"
     assert await router.transcribe(np.zeros(10, np.float32), ["x"]) == "whisper sagt"
+    preloaded: list[str] = []
+
+    async def preload() -> None:
+        preloaded.append("parakeet")
+
+    parakeet.preload = preload  # type: ignore[attr-defined]
     new = _settings("parakeet")
     router.on_settings_changed(cfg["s"], new)
     cfg["s"] = new
+    await asyncio.sleep(0.01)
+    assert preloaded == ["parakeet"]  # switching warms the new engine right away
     assert await router.transcribe(np.zeros(10, np.float32)) == "parakeet sagt"
     assert state.data.models.stt_engine == "parakeet" and whisper.calls == [10] and parakeet.calls == [10]
     cfg["s"] = _settings("deepgram")
