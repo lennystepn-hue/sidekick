@@ -57,6 +57,10 @@ pnpm tauri build --config src-tauri/tauri.release.conf.json          # MSI/NSIS 
 
 Der Gestentest in den Einstellungen zeigt jedes Roh-Event. Damit klärt sich am ersten Tag, ob "Halten" bei dir überhaupt ankommt. Solange die Brille verbunden ist, werden die Media-Keys geschluckt, damit Spotify nicht mitspielt.
 
+## Freigaben in der eingebetteten Session
+
+Standard ist der Auto-Modus von Claude Code (`claude.permission_mode = "auto"`): Claude entscheidet selbst und fragt nur bei riskanten Aktionen. In den Einstellungen unter Claude lässt sich das umstellen auf "Dateiänderungen automatisch, Befehle fragen", "Immer fragen" oder "Nie fragen". Die Umstellung wirkt sofort, auch in einer laufenden Session. Rückfragen, die trotzdem kommen, werden weiterhin vorgelesen und lassen sich per Sprache ("ja", "nein", "immer") beantworten.
+
 ## Externe Session anbinden
 
 Einstellungen → Hooks → Projekt wählen → Installieren. Das schreibt in die gewählte `settings.json` sechs HTTP-Hooks (Stop, Notification, PermissionRequest, UserPromptSubmit, SessionStart, SessionEnd) auf `http://127.0.0.1:47821/hook/<Event>`. Fremde Hooks bleiben unangetastet, Entfernen nimmt nur die eigenen wieder raus. Zum manuellen Einfügen zeigt das UI das JSON an.

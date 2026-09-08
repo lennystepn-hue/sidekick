@@ -191,7 +191,10 @@ class HookHandler:
             tool_name = str(data.get("tool_name") or "")
             tool_input = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {}
             keys = self._perm_keys(
-                session.session_id, data.get("tool_use_id") or payload.get("tool_use_id"), tool_name, tool_input
+                session.session_id,
+                data.get("tool_use_id") or payload.get("tool_use_id"),
+                tool_name,
+                tool_input,
             )
             if self._duplicate(*keys):
                 return ""

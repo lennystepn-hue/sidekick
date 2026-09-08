@@ -69,8 +69,13 @@ class SounddeviceCapture:
 
         try:
             self._stream = sd.InputStream(
-                samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=FRAME, device=device,
-                extra_settings=extra, callback=callback_native,
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                blocksize=FRAME,
+                device=device,
+                extra_settings=extra,
+                callback=callback_native,
             )
             self._stream.start()
         except sd.PortAudioError as exc:
@@ -80,11 +85,18 @@ class SounddeviceCapture:
             self._resampler = Resampler(self.native_rate, SAMPLE_RATE)
             log.warning(
                 "capture at 16 kHz failed on %r (%s); using %s Hz with resampling",
-                info["name"], exc, self.native_rate,
+                info["name"],
+                exc,
+                self.native_rate,
             )
             self._stream = sd.InputStream(
-                samplerate=self.native_rate, channels=1, dtype="float32", blocksize=block, device=device,
-                extra_settings=extra, callback=callback_resampled,
+                samplerate=self.native_rate,
+                channels=1,
+                dtype="float32",
+                blocksize=block,
+                device=device,
+                extra_settings=extra,
+                callback=callback_resampled,
             )
             self._stream.start()
         portaudio.stream_opened()

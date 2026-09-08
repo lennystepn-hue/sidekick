@@ -70,6 +70,7 @@ const settings: Settings = {
     summary_model: "claude-haiku-4-5",
     btw_model: "claude-sonnet-5",
     session_model: "",
+    permission_mode: "auto",
     cli_path: "",
     last_cwd: CWD,
   },

@@ -143,7 +143,7 @@ class EmbeddedSession:
         return ClaudeAgentOptions(
             cwd=cwd,
             model=model or cfg.session_model or None,
-            permission_mode="default",
+            permission_mode=cfg.permission_mode,
             can_use_tool=self._can_use_tool,
             include_partial_messages=True,
             setting_sources=list(SETTING_SOURCES),
@@ -188,6 +188,7 @@ class EmbeddedSession:
             status="idle",
             model=model or "",
             started_at=now_iso(),
+            permission_mode=self._settings().claude.permission_mode,
         )
         self._db.add_session(self.session_id, cwd, "embedded")
         self._state.update(session=info)
@@ -233,6 +234,17 @@ class EmbeddedSession:
         if self.running:
             self._interrupted = True
             await self._client.interrupt()
+
+    async def set_permission_mode(self, mode: str) -> None:
+        """Switch the running session's permission mode (settings change)."""
+        if self.running and hasattr(self._client, "set_permission_mode"):
+            await self._client.set_permission_mode(mode)
+            log.info("permission mode switched to %s", mode)
+            self._state.update_session(permission_mode=mode)
+
+    def on_settings_changed(self, old: Settings, new: Settings) -> None:
+        if old.claude.permission_mode != new.claude.permission_mode and self.running:
+            asyncio.ensure_future(self.set_permission_mode(new.claude.permission_mode))
 
     # --- permissions ---------------------------------------------------
     async def _can_use_tool(self, tool_name: str, tool_input: dict[str, Any], context: Any) -> Any:

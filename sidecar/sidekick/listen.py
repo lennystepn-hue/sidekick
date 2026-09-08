@@ -161,7 +161,9 @@ class ListenController:
         cfg = self._settings()
         if cfg.stt.engine != "faster-whisper":
             self._state.update(mode="idle")
-            self._fail("stt", f"STT-Engine '{cfg.stt.engine}' ist nicht konfiguriert; bitte faster-whisper wählen")
+            self._fail(
+                "stt", f"STT-Engine '{cfg.stt.engine}' ist nicht konfiguriert; bitte faster-whisper wählen"
+            )
             return
         self._state.update(mode=listen_mode)
         # Play the start tone to the end before the HFP link mutes A2DP.
@@ -228,7 +230,9 @@ class ListenController:
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
-        self._reviews[tid] = ReviewEntry(future=future, raw=raw, cleaned=cleaned, mode=mode, created=time.time())
+        self._reviews[tid] = ReviewEntry(
+            future=future, raw=raw, cleaned=cleaned, mode=mode, created=time.time()
+        )
         decision: tuple[str, str | None]
         try:
             if delay > 0:

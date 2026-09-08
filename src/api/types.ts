@@ -25,6 +25,7 @@ export interface Session {
   status: SessionStatus;
   model: string;
   started_at: string;
+  permission_mode?: string;
 }
 
 export interface BluetoothAdapterState {
@@ -313,6 +314,7 @@ export interface ClaudeSettings {
   summary_model: string;
   btw_model: string;
   session_model: string;
+  permission_mode: "auto" | "acceptEdits" | "default" | "bypassPermissions";
   cli_path: string;
   last_cwd: string;
 }

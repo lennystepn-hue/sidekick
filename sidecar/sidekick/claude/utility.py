@@ -113,7 +113,9 @@ class UtilityLLM:
             self.calls_made += 1
             if self._warm_enabled:
                 try:
-                    return await asyncio.wait_for(self._complete_warm(key, model, system, prompt), self._timeout_s)
+                    return await asyncio.wait_for(
+                        self._complete_warm(key, model, system, prompt), self._timeout_s
+                    )
                 except Exception as exc:  # noqa: BLE001
                     log.warning("warm claude client for %s failed (%s); retrying one-shot", model, exc)
                     await self._drop(key)

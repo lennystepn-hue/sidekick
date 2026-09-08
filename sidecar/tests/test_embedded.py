@@ -149,7 +149,7 @@ async def test_session_streams_messages_and_calls_on_done(tmp_path):
     info = await session.start(str(tmp_path), None)
     assert info.mode == "embedded" and state.session.status == "idle"
     client = FakeClient.instances[-1]
-    assert client.options.cwd == str(tmp_path) and client.options.permission_mode == "default"
+    assert client.options.cwd == str(tmp_path) and client.options.permission_mode == "auto"
     await session.send("Sag OK")
     assert client.queries == ["Sag OK"] and state.session.status == "running"
     await client.queue.put(

@@ -96,7 +96,9 @@ class AudioRouter:
             self._state.update_audio(previous_output_device=None, routed_to_glasses=False)
             raise
         self._previous = None
-        self._state.update_audio(output_device=prev.name, previous_output_device=None, routed_to_glasses=False)
+        self._state.update_audio(
+            output_device=prev.name, previous_output_device=None, routed_to_glasses=False
+        )
         return prev
 
     def ensure_a2dp(self) -> None:

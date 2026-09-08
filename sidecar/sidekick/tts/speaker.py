@@ -129,7 +129,9 @@ class Speaker:
                 while True:
                     try:
                         # A stalled network must not block the player thread forever.
-                        chunk = await asyncio.wait_for(agen.__anext__(), FIRST_CHUNK_TIMEOUT_S if first else CHUNK_TIMEOUT_S)
+                        chunk = await asyncio.wait_for(
+                            agen.__anext__(), FIRST_CHUNK_TIMEOUT_S if first else CHUNK_TIMEOUT_S
+                        )
                     except StopAsyncIteration:
                         break
                     first = False

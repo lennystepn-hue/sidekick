@@ -84,7 +84,7 @@ class Services:
         self._started = False
         for component in reversed(self.components):
             stopper = getattr(component, "stop", None)
-            if stopper is None:
+            if stopper is None or component is self.session:  # the session is stopped by _Shutdown
                 continue
             try:
                 result = stopper()
@@ -444,7 +444,9 @@ def build_services(
         settings,
         embedded_waiting=lambda: bool(services.session.pending) if services.session else False,
         ignore_session_ids=lambda: (
-            {services.session.sdk_session_id} if services.session and services.session.sdk_session_id else set()
+            {services.session.sdk_session_id}
+            if services.session and services.session.sdk_session_id
+            else set()
         ),
     )
     services.hooks = hooks
@@ -578,7 +580,7 @@ def build_services(
     )
     services.gestures = gestures
 
-    services.components.extend([speaker, presence, gestures, stt, _Background(services)])
+    services.components.extend([speaker, presence, gestures, stt, session, _Background(services)])
     if hardware:
         services.components.append(doctor)
     services.components.append(_Shutdown(services))

@@ -81,6 +81,9 @@ class ClaudeSettings(BaseModel):
     summary_model: str = "claude-haiku-4-5"
     btw_model: str = "claude-sonnet-5"
     session_model: str = ""
+    # Claude Code permission mode for the embedded session. "auto" lets Claude Code decide
+    # and only asks for risky actions; "default" asks for everything; "bypassPermissions" never asks.
+    permission_mode: Literal["auto", "acceptEdits", "default", "bypassPermissions"] = "auto"
     cli_path: str = ""
     last_cwd: str = ""
 

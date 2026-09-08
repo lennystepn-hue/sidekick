@@ -26,6 +26,23 @@ const st = useSettingsStore();
   <SettingRow label="btw-Modell" hint="Für Nebenfragen, ohne Tool-Zugriff." input-id="c-btw">
     <input id="c-btw" class="input mono" :value="settings.claude.btw_model" @change="st.set('claude', 'btw_model', strFrom($event).trim())" />
   </SettingRow>
+  <SettingRow
+    label="Freigaben"
+    hint="Auto: Claude Code entscheidet selbst und fragt nur bei riskanten Aktionen. Wirkt sofort, auch in der laufenden Session."
+    input-id="c-perm"
+  >
+    <select
+      id="c-perm"
+      class="select"
+      :value="settings.claude.permission_mode"
+      @change="st.set('claude', 'permission_mode', strFrom($event) as Settings['claude']['permission_mode'])"
+    >
+      <option value="auto">Auto: nur bei riskanten Aktionen fragen</option>
+      <option value="acceptEdits">Dateiänderungen automatisch, Befehle fragen</option>
+      <option value="default">Immer fragen</option>
+      <option value="bypassPermissions">Nie fragen (alles erlauben)</option>
+    </select>
+  </SettingRow>
   <SettingRow label="Session-Modell" hint="Leer = Claude-Code-Standard." input-id="c-sess">
     <input
       id="c-sess"

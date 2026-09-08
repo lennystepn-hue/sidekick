@@ -30,6 +30,7 @@ class SessionInfo:
     status: SessionStatus = "idle"
     model: str = ""
     started_at: str = ""
+    permission_mode: str = "auto"
 
 
 @dataclass(slots=True)

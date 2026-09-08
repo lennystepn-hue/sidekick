@@ -87,8 +87,12 @@ class SounddeviceOutput:
         extra = portaudio.wasapi_settings(device)
         try:
             stream = sd.OutputStream(
-                samplerate=samplerate, channels=channels, dtype="float32", device=device,
-                extra_settings=extra, latency="high",
+                samplerate=samplerate,
+                channels=channels,
+                dtype="float32",
+                device=device,
+                extra_settings=extra,
+                latency="high",
             )
             stream.start()
             return _SdSink(stream, samplerate, samplerate)
@@ -97,11 +101,18 @@ class SounddeviceOutput:
             native = int(info["default_samplerate"])
             log.warning(
                 "output at %s Hz failed on %r (%s); using %s Hz with seamless resampling",
-                samplerate, info["name"], exc, native,
+                samplerate,
+                info["name"],
+                exc,
+                native,
             )
             stream = sd.OutputStream(
-                samplerate=native, channels=channels, dtype="float32", device=device,
-                extra_settings=extra, latency="high",
+                samplerate=native,
+                channels=channels,
+                dtype="float32",
+                device=device,
+                extra_settings=extra,
+                latency="high",
             )
             stream.start()
             return _SdSink(stream, samplerate, native)
