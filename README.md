@@ -97,6 +97,7 @@ The REST and WebSocket contract lives in [`docs/superpowers/plans/2026-09-07-sid
 
 - Windows 11. Ray-Ban Meta glasses paired as a Bluetooth headset (the device name is configurable; any headset with media keys works, you just lose the glasses-specific defaults).
 - [Claude Code](https://code.claude.com) installed and logged in (Pro or Max). Sidekick reuses that login; no API key.
+- Node 22 at runtime if you want the Sidekick channel for terminal sessions (the channel server is a Node script).
 - To build: [uv](https://docs.astral.sh/uv/), Node 22 with pnpm, Rust with the MSVC toolchain (see the GNU note below if you do not have Visual Studio Build Tools), WebView2 (ships with Windows 11).
 - Optional: an ElevenLabs key for the nicer voice. Without it Sidekick speaks through Edge TTS.
 
@@ -154,6 +155,23 @@ Permission mode defaults to Claude Code's **auto** mode (Claude decides, asks on
 
 Settings → Hooks → pick a project → Install. That writes six HTTP hooks (`Stop`, `Notification`, `PermissionRequest`, `UserPromptSubmit`, `SessionStart`, `SessionEnd`) into the chosen `settings.json`, pointing at `http://127.0.0.1:47821/hook/<Event>`. Existing hooks are left alone; uninstall removes only Sidekick's. From then on your terminal sessions announce completions and questions on the glasses, and they appear in a "Terminal" group in the sidebar. **Übernehmen** forks such a session into Sidekick (new Claude Code session id, full history; the terminal keeps its own transcript and goes quiet until you type there again), **Später** defers its open permission prompt. Spoken text for those sessions lands in the clipboard (optionally typed straight into the terminal via SendInput). The JSON is shown in the UI if you prefer pasting it yourself.
 
+#### The Sidekick channel: voice in, permissions out, phone included
+
+Hooks only talk one way. For a real two-way link Sidekick ships a [Claude Code channel](https://code.claude.com/docs/en/channels) (`channels/sidekick`, a small Node script). Settings → Hooks → **Sidekick-Kanal einrichten** registers it once as a user-scope MCP server (`claude mcp add --scope user sidekick -- node …/sidekick-channel.mjs`; needs Node 22). Then start terminal sessions from the sidebar's **Terminal** button: Sidekick opens Windows Terminal in the chosen folder with
+
+```
+claude --remote-control <name> --dangerously-load-development-channels server:sidekick
+```
+
+and installs the HTTP hooks for that folder if they are missing. What you get:
+
+- What you say on the glasses goes straight into that session as a channel event, no clipboard, no SendInput.
+- The session's permission prompts are relayed to Sidekick: the glasses ask, "ja", "nein" or "später" answers, and the UI shows the same card.
+- Claude can talk back through a `reply` tool when you should hear something right now.
+- With `--remote-control`, the same session shows up in the Claude mobile app: approve there, watch there, get push notifications there. Sidekick sessions started through the Agent SDK cannot use Remote Control (the flag is ignored in headless mode), so this launcher is the way to get glasses and phone on one session.
+
+Uncheck either box in the launcher to leave the flags out. `POST /channel/push` and `GET /channel/status` are there for scripts.
+
 ### Audio and presence
 
 The glasses are a normal Bluetooth headset to Windows: A2DP for good playback, HFP for the microphone. Sidekick keeps A2DP as the default output, switches to HFP only while listening, and switches back afterwards, so music quality is never degraded by the mic. Presence is derived from screen lock, input idle time and the Bluetooth connection: when you leave, output goes back to the previous device; when you are back, it routes to the glasses again and chimes. A tray icon shows the state at a glance.
@@ -186,7 +204,7 @@ Next up, in this order (plan: [`docs/superpowers/plans/2026-09-08-next-features.
 
 1. ~~**Parakeet TDT 0.6B v3** as the local speech engine~~ done: select "Parakeet" under Settings → Sprache.
 2. ~~**Adopt terminal sessions**, a "later" answer for permissions, a quiet period after your own input~~ done: "Übernehmen" and "Später" in the Terminal group, `quiet_after_input_s` in Settings → Sprachausgabe.
-3. **A Sidekick channel** for Claude Code's channels preview: push voice straight into terminal sessions and relay their permission prompts to the glasses, plus a launcher for terminal sessions with Remote Control so the phone can steer what the glasses announce.
+3. ~~**A Sidekick channel** for Claude Code's channels preview plus a terminal launcher with Remote Control~~ done: see "Terminal sessions" above.
 
 Ideas that did not make the cut, and why, are in [`docs/superpowers/specs/2026-09-07-sidekick-design.md`](docs/superpowers/specs/2026-09-07-sidekick-design.md).
 
@@ -198,6 +216,7 @@ Ideas that did not make the cut, and why, are in [`docs/superpowers/specs/2026-0
 - Intel AX200-class Bluetooth adapters sometimes fall into Code 10 after long uptimes. The UI shows a banner with a one-click `pnputil /restart-device` (UAC prompt); if that does not help, a full power-off cycle does.
 - Audio is always opened in WASAPI shared mode with automatic conversion, so 44.1 kHz tones and 24 kHz speech play cleanly on a 48 kHz endpoint. If the log says `seamless resampling`, the device refused conversion and Sidekick resamples itself.
 - If you ever see `Failed to start Claude Code: [WinError 50]` from a packaged build: claude.exe was trying to inherit the sidecar's stderr handle, which does not work under Tauri. Every `ClaudeAgentOptions` now sets a `stderr` callback so the SDK pipes it instead.
+- Claude Code's channels are a research preview: a custom channel like Sidekick's only loads with `--dangerously-load-development-channels`, which asks for a confirmation once per session start. The launcher passes the flag for you.
 - No wake word, no Deepgram, no macOS or Linux (yet).
 
 ## Building without Visual Studio Build Tools
