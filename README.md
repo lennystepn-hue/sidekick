@@ -65,6 +65,10 @@ pnpm tauri build --config src-tauri/tauri.release.conf.json          # MSI/NSIS 
 
 Der Gestentest in den Einstellungen zeigt jedes Roh-Event. Damit klärt sich am ersten Tag, ob "Halten" bei dir überhaupt ankommt. Solange die Brille verbunden ist, werden die Media-Keys geschluckt, damit Spotify nicht mitspielt.
 
+## Mehrere Sessions
+
+Die linke Seitenleiste listet alle Sessions. Mehrere können gleichzeitig laufen (jede hat ihren eigenen Claude-Code-Prozess); Sprache und Transkript gehen immer an die aktive Session, und wenn mehrere laufen, nennt die Ansage die Session beim Namen. Sessions werden in SQLite gespeichert, inklusive der Claude-Code-Session-ID: Eine beendete Session lässt sich später fortsetzen, Claude kennt dann den bisherigen Verlauf (`resume` des Agent SDK). Der Titel wird aus der ersten Nachricht gebildet und kann umbenannt werden. Sessions aus der Zeit vor dieser Funktion lassen sich nur ansehen, nicht fortsetzen.
+
 ## Freigaben in der eingebetteten Session
 
 Standard ist der Auto-Modus von Claude Code (`claude.permission_mode = "auto"`): Claude entscheidet selbst und fragt nur bei riskanten Aktionen. In den Einstellungen unter Claude lässt sich das umstellen auf "Dateiänderungen automatisch, Befehle fragen", "Immer fragen" oder "Nie fragen". Die Umstellung wirkt sofort, auch in einer laufenden Session. Rückfragen, die trotzdem kommen, werden weiterhin vorgelesen und lassen sich per Sprache ("ja", "nein", "immer") beantworten.
