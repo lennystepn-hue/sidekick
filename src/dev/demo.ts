@@ -119,7 +119,13 @@ const state: AppState = {
   sessions: [],
   active_session_id: activeId,
   bluetooth_adapter: { ok: false, problem_code: 10, name: "Intel(R) Wireless Bluetooth(R)", instance_id: "USB\\VID_8087&PID_0029" },
-  models: { whisper_loaded: true, whisper_model: "small" },
+  models: {
+    stt_engine: "parakeet",
+    stt_model: "nemo-parakeet-tdt-0.6b-v3 int8",
+    stt_loaded: true,
+    stt_downloading: false,
+    stt_progress: 0,
+  },
   external_sessions: 1,
 };
 
@@ -128,9 +134,11 @@ const settings: Settings = {
   presence: { idle_threshold_min: 5, auto_connect: true, poll_interval_s: 2 },
   audio: { glasses_device_name: "Ray-Ban Meta", restore_previous_device: true, tone_volume: 0.6 },
   stt: {
-    engine: "faster-whisper",
+    engine: "parakeet",
     model: "small",
     compute_type: "int8",
+    parakeet_model: "nemo-parakeet-tdt-0.6b-v3",
+    parakeet_quantization: "int8",
     silence_timeout_s: 1.5,
     no_speech_timeout_s: 8,
     max_duration_s: 60,

@@ -174,7 +174,7 @@ class _Background:
         self._tasks: list[asyncio.Task] = []
 
     def start(self) -> None:
-        self._tasks.append(spawn(self._warm_whisper(), "warm-whisper"))
+        self._tasks.append(spawn(self._warm_stt(), "warm-stt"))
         self._tasks.append(spawn(self._warm_llm(), "warm-llm"))
         self._tasks.append(spawn(self._battery_loop(), "battery"))
 
@@ -185,16 +185,16 @@ class _Background:
         if self._s.llm is not None and hasattr(self._s.llm, "close"):
             await self._s.llm.close()
 
-    async def _warm_whisper(self) -> None:
+    async def _warm_stt(self) -> None:
         stt = self._s.stt
         if stt is None or not hasattr(stt, "preload"):
             return
         try:
             await stt.preload()
         except Exception as exc:  # noqa: BLE001
-            log.warning("whisper preload failed: %s", exc)
+            log.warning("stt preload failed: %s", exc)
             self._s.bus.publish(
-                "error", {"module": "stt", "message": f"Whisper-Modell konnte nicht geladen werden: {exc}"}
+                "error", {"module": "stt", "message": f"Sprachmodell konnte nicht geladen werden: {exc}"}
             )
 
     async def _warm_llm(self) -> None:
@@ -306,6 +306,8 @@ def build_services(
     from .paths import bundled_models_dir, models_dir
     from .presence.monitor import FakePresenceBackends, PresenceMonitor
     from .stt.cleanup import Cleaner
+    from .stt.parakeet import ParakeetSTT
+    from .stt.router import SttRouter
     from .stt.whisper import WhisperSTT
     from .tts.edge import EdgeEngine
     from .tts.elevenlabs import ElevenLabsEngine
@@ -367,11 +369,15 @@ def build_services(
 
     # --- stt / tts ---------------------------------------------------------------
     if hardware:
-        stt: Any = WhisperSTT(settings, models_dir(), state)
+        engines_stt: dict[str, Any] = {
+            "parakeet": ParakeetSTT(settings, models_dir(), state),
+            "faster-whisper": WhisperSTT(settings, models_dir(), state),
+        }
     else:
         from .stt.whisper import FakeSTT
 
-        stt = FakeSTT()
+        engines_stt = {"parakeet": FakeSTT(), "faster-whisper": FakeSTT()}
+    stt: Any = SttRouter(engines_stt, settings, state)
     engines = {
         "elevenlabs": ElevenLabsEngine(lambda: services.secrets.get("elevenlabs"), settings),
         "edge": EdgeEngine(settings),

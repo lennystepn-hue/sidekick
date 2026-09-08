@@ -49,8 +49,11 @@ class AdapterState:
 
 @dataclass(slots=True)
 class ModelsState:
-    whisper_loaded: bool = False
-    whisper_model: str = ""
+    stt_engine: str = ""
+    stt_model: str = ""
+    stt_loaded: bool = False
+    stt_downloading: bool = False
+    stt_progress: float = 0.0
 
 
 @dataclass(slots=True)

@@ -14,7 +14,13 @@ const MODELS = ["tiny", "base", "small", "medium"];
 const modelOptions = computed(() =>
   MODELS.includes(props.settings.stt.model) ? MODELS : [...MODELS, props.settings.stt.model],
 );
-const whisper = computed(() => app.state?.models);
+const models = computed(() => app.state?.models);
+const modelChip = computed(() => {
+  const m = models.value;
+  if (!m) return null;
+  if (m.stt_downloading) return { ok: false, text: `lädt Modell ${Math.round((m.stt_progress || 0) * 100)} %` };
+  return m.stt_loaded ? { ok: true, text: `geladen: ${m.stt_model}` } : { ok: false, text: "nicht geladen" };
+});
 
 const deepgramKey = ref("");
 const savingKey = ref(false);
@@ -33,24 +39,35 @@ async function clearKey(): Promise<void> {
 </script>
 
 <template>
-  <SettingRow label="Engine" hint="Whisper läuft lokal auf der CPU, Deepgram in der Cloud (braucht einen API-Key)." input-id="s-engine">
+  <SettingRow
+    label="Engine"
+    hint="Parakeet und Whisper laufen lokal auf der CPU. Parakeet ist rund zehnmal schneller (25 europäische Sprachen, einmalig 670 MB Download), Whisper kennt mehr Sprachen. Deepgram läuft in der Cloud."
+    input-id="s-engine"
+  >
     <select
       id="s-engine"
       class="select narrow"
       :value="settings.stt.engine"
       @change="st.set('stt', 'engine', strFrom($event) as Settings['stt']['engine'])"
     >
+      <option value="parakeet">Parakeet (schnell)</option>
       <option value="faster-whisper">Whisper</option>
       <option value="deepgram">Deepgram</option>
     </select>
+    <span v-if="modelChip" class="chip" :class="modelChip.ok ? 'ok' : ''">{{ modelChip.text }}</span>
   </SettingRow>
-  <SettingRow label="Whisper-Modell" hint="Größer = genauer, aber langsamer auf der CPU." input-id="s-model">
+  <SettingRow
+    v-if="settings.stt.engine === 'parakeet'"
+    label="Parakeet-Modell"
+    hint="NVIDIA Parakeet TDT 0.6B v3 als int8-ONNX. Fachbegriffe kommen lautschriftlich an und werden vom Cleanup mit den Hotwords korrigiert."
+    input-id="s-pmodel"
+  >
+    <span id="s-pmodel" class="mono muted">{{ settings.stt.parakeet_model }} · {{ settings.stt.parakeet_quantization || "fp32" }}</span>
+  </SettingRow>
+  <SettingRow v-if="settings.stt.engine === 'faster-whisper'" label="Whisper-Modell" hint="Größer = genauer, aber langsamer auf der CPU." input-id="s-model">
     <select id="s-model" class="select narrow" :value="settings.stt.model" @change="st.set('stt', 'model', strFrom($event))">
       <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
     </select>
-    <span v-if="whisper" class="chip" :class="whisper.whisper_loaded ? 'ok' : ''">
-      {{ whisper.whisper_loaded ? `geladen: ${whisper.whisper_model}` : "nicht geladen" }}
-    </span>
   </SettingRow>
   <SettingRow label="Deepgram API-Key" hint="Wird im Windows Credential Manager gespeichert und nie angezeigt." input-id="s-dgkey">
     <input

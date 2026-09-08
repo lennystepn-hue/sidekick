@@ -159,11 +159,17 @@ class ListenController:
     async def _pipeline(self, mode: str) -> None:
         listen_mode = "btw_listening" if mode == "btw" else "listening"
         cfg = self._settings()
-        if cfg.stt.engine != "faster-whisper":
+        checker = getattr(self._stt, "current", None)
+        try:
+            if checker is not None:
+                checker()
+            elif cfg.stt.engine == "deepgram":
+                raise RuntimeError(
+                    "STT-Engine 'Deepgram' ist nicht konfiguriert; bitte Parakeet oder Whisper wählen"
+                )
+        except RuntimeError as exc:  # engine not available (e.g. deepgram without an implementation)
             self._state.update(mode="idle")
-            self._fail(
-                "stt", f"STT-Engine '{cfg.stt.engine}' ist nicht konfiguriert; bitte faster-whisper wählen"
-            )
+            self._fail("stt", str(exc))
             return
         self._state.update(mode=listen_mode)
         # Play the start tone to the end before the HFP link mutes A2DP.
@@ -203,7 +209,7 @@ class ListenController:
             self._state.update(mode="idle")
             return
 
-        cleaned, cleaned_ok = await self._cleaner.clean(raw)
+        cleaned, cleaned_ok = await self._cleaner.clean(raw, cfg.stt.hotwords)
         tid = new_id()
         delay = max(0.0, float(cfg.stt.review_delay_s))
         deadline = time.time() + delay

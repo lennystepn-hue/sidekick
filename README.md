@@ -165,7 +165,7 @@ The glasses are a normal Bluetooth headset to Windows: A2DP for good playback, H
 | Section | Highlights |
 |---|---|
 | `audio` | device name to look for, restore the previous output device, tone volume |
-| `stt` | engine and model (`faster-whisper` `small` int8 by default), silence and max duration, languages, hotwords, review delay, cleanup on/off |
+| `stt` | engine (`parakeet` by default, or `faster-whisper`; Parakeet TDT 0.6B v3 int8 is about ten times faster on the CPU and downloads 670 MB on first use), Whisper model, silence and max duration, languages, hotwords (Parakeet has no hotwords, so the cleanup gets them as known terms), review delay, cleanup on/off |
 | `tts` | `elevenlabs` or `edge`, voice, summarize before speaking |
 | `gestures` | mapping of single/double/triple/hold, capture media keys |
 | `claude` | models for cleanup, summary and btw, permission mode, CLI path |
@@ -182,9 +182,9 @@ Warm, tinted neutrals with an amber accent; Bricolage Grotesque for titles, Inst
 
 ## Roadmap
 
-Next up, in this order:
+Next up, in this order (plan: [`docs/superpowers/plans/2026-09-08-next-features.md`](docs/superpowers/plans/2026-09-08-next-features.md)):
 
-1. **Parakeet TDT 0.6B v3** as the local speech engine (25 European languages, int8 ONNX on the runtime we already ship), for transcripts in well under a second instead of 0.7× real time.
+1. ~~**Parakeet TDT 0.6B v3** as the local speech engine~~ done: select "Parakeet" under Settings → Sprache.
 2. **Adopt terminal sessions** into Sidekick with one click (we know their ids from the hooks), a "later" answer for permissions, and a quiet period after your own input.
 3. **A Sidekick channel** for Claude Code's channels preview: push voice straight into terminal sessions and relay their permission prompts to the glasses, plus a launcher for terminal sessions with Remote Control so the phone can steer what the glasses announce.
 
@@ -194,7 +194,7 @@ Ideas that did not make the cut, and why, are in [`docs/superpowers/specs/2026-0
 
 - The glasses' camera and capture button are not reachable on Windows; Meta's Device Access Toolkit is iOS and Android only.
 - While the HFP microphone is open, audio quality drops to phone level. That is why the mic is only open while listening.
-- Whisper `small` on CPU runs at about 0.7× real time; `base` is faster and fine for short instructions (Parakeet is coming, see the roadmap).
+- Whisper `small` on CPU runs at about 0.7× real time. Parakeet TDT 0.6B v3 (the `parakeet` engine) does the same work at about 0.08× real time, but spells technical terms phonetically; keep your hotwords list current so the cleanup can fix them.
 - Intel AX200-class Bluetooth adapters sometimes fall into Code 10 after long uptimes. The UI shows a banner with a one-click `pnputil /restart-device` (UAC prompt); if that does not help, a full power-off cycle does.
 - Audio is always opened in WASAPI shared mode with automatic conversion, so 44.1 kHz tones and 24 kHz speech play cleanly on a 48 kHz endpoint. If the log says `seamless resampling`, the device refused conversion and Sidekick resamples itself.
 - If you ever see `Failed to start Claude Code: [WinError 50]` from a packaged build: claude.exe was trying to inherit the sidecar's stderr handle, which does not work under Tauri. Every `ClaudeAgentOptions` now sets a `stderr` callback so the SDK pipes it instead.

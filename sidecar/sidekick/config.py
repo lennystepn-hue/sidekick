@@ -35,9 +35,12 @@ class AudioSettings(BaseModel):
 
 
 class SttSettings(BaseModel):
-    engine: Literal["faster-whisper", "deepgram"] = "faster-whisper"
+    engine: Literal["parakeet", "faster-whisper", "deepgram"] = "parakeet"
     model: str = "small"
     compute_type: str = "int8"
+    # Parakeet TDT 0.6B v3 (onnx-asr): 25 European languages, ~0.08x real time on CPU.
+    parakeet_model: str = "nemo-parakeet-tdt-0.6b-v3"
+    parakeet_quantization: str = "int8"
     silence_timeout_s: float = 1.5
     no_speech_timeout_s: float = 8.0
     max_duration_s: float = 60.0

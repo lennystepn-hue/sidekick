@@ -36,6 +36,10 @@ class WhisperSTT:
     def loaded(self) -> bool:
         return self._model is not None
 
+    def describe(self) -> tuple[str, str]:
+        cfg = self._settings().stt
+        return "faster-whisper", f"{cfg.model} {cfg.compute_type}".strip()
+
     def _load(self) -> Any:
         cfg = self._settings().stt
         with self._lock:
@@ -52,7 +56,9 @@ class WhisperSTT:
             )
             self._model_name = cfg.model
             if self._state is not None:
-                self._state.set_models(whisper_loaded=True, whisper_model=cfg.model)
+                self._state.set_models(
+                    stt_engine="faster-whisper", stt_model=self.describe()[1], stt_loaded=True
+                )
             log.info("whisper model %s ready", cfg.model)
             return self._model
 
@@ -63,8 +69,8 @@ class WhisperSTT:
         if old.stt.model != new.stt.model or old.stt.compute_type != new.stt.compute_type:
             with self._lock:
                 self._model = None
-            if self._state is not None:
-                self._state.set_models(whisper_loaded=False, whisper_model=new.stt.model)
+            if self._state is not None and new.stt.engine == "faster-whisper":
+                self._state.set_models(stt_loaded=False, stt_model=self.describe()[1])
 
     def _transcribe_sync(self, audio: np.ndarray, hotwords: list[str] | None) -> str:
         model = self._load()
