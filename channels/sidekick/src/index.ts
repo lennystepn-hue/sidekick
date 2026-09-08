@@ -124,5 +124,9 @@ process.once('SIGTERM', () => shutdown('SIGTERM'));
 mcp.onclose = () => shutdown('transport closed');
 
 await mcp.connect(new StdioServerTransport());
-bridge.start();
-log(`ready (pid ${process.pid}, cwd ${process.cwd()}, sidecar ${sidecarUrl})`);
+// Claude Code starts every configured MCP server, also in sessions that never opted this
+// one in as a channel (utility calls of the sidecar itself), and drops it again within
+// milliseconds. Waiting a moment before announcing ourselves keeps those out of Sidekick.
+const START_DELAY_MS = Number(process.env.SIDEKICK_CHANNEL_START_DELAY_MS ?? 1500);
+setTimeout(() => bridge.start(), START_DELAY_MS).unref?.();
+log(`ready (pid ${process.pid}, cwd ${process.cwd()}, sidecar ${sidecarUrl}, connecting in ${START_DELAY_MS} ms)`);

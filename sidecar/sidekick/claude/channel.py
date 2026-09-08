@@ -24,6 +24,7 @@ from .summarize import Summarizer
 log = logging.getLogger(__name__)
 
 Sender = Callable[[dict[str, Any]], Awaitable[None]]
+RELAY_TTL_S = 15 * 60
 
 
 def _norm(path: str) -> str:
@@ -251,6 +252,13 @@ class ChannelHub:
 
     def tick_snoozes(self, now: float | None = None) -> list[str]:
         now = time.time() if now is None else now
+        # A relay the terminal already answered never gets a verdict from us; drop it after a while.
+        stale = [r.request_id for r in self.relays.values() if now - r.ts > RELAY_TTL_S]
+        for request_id in stale:
+            del self.relays[request_id]
+            self._bus.publish("permission_resolved", {"id": request_id, "decision": "dropped"})
+        if stale:
+            self._refresh()
         due = [
             r.request_id
             for r in self.relays.values()
