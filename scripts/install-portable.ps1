@@ -42,6 +42,8 @@ try {
     }
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
     Copy-Item $exe (Join-Path $InstallDir "sidekick.exe") -Force
+    # The windows-gnu build links WebView2Loader.dll dynamically; it must sit next to the exe.
+    Get-ChildItem (Split-Path $exe) -Filter "*.dll" | ForEach-Object { Copy-Item $_.FullName (Join-Path $InstallDir $_.Name) -Force }
     Copy-Item $sidecarExe.FullName (Join-Path $InstallDir "sidekick-sidecar.exe") -Force
     $target = Join-Path $InstallDir "_internal"
     if (Test-Path $target) { Remove-Item -Recurse -Force $target }

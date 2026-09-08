@@ -84,7 +84,7 @@ class Services:
         self._started = False
         for component in reversed(self.components):
             stopper = getattr(component, "stop", None)
-            if stopper is None or component is self.session:  # the session is stopped by _Shutdown
+            if stopper is None:
                 continue
             try:
                 result = stopper()
@@ -580,11 +580,21 @@ def build_services(
     )
     services.gestures = gestures
 
-    services.components.extend([speaker, presence, gestures, stt, session, _Background(services)])
+    services.components.extend([speaker, presence, gestures, stt, _SettingsRelay(session), _Background(services)])
     if hardware:
         services.components.append(doctor)
     services.components.append(_Shutdown(services))
     return services
+
+
+class _SettingsRelay:
+    """Forwards settings changes to the embedded session without exposing its start/stop."""
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+
+    def on_settings_changed(self, old: Settings, new: Settings) -> None:
+        self._session.on_settings_changed(old, new)
 
 
 class _Shutdown:

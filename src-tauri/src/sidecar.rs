@@ -279,7 +279,8 @@ fn build_command<R: Runtime>(app: &AppHandle<R>) -> Result<Command, tauri_plugin
 fn build_command<R: Runtime>(app: &AppHandle<R>) -> Result<Command, tauri_plugin_shell::Error> {
     Ok(app
         .shell()
-        .sidecar("binaries/sidekick-sidecar")?
+        // Rust API takes the bare sidecar name; the bundler places it as <exe dir>\sidekick-sidecar.exe
+        .sidecar("sidekick-sidecar")?
         .args(["--port"])
         .arg(SIDECAR_PORT.to_string())
         .arg("--parent-pid")
