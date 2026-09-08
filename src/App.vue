@@ -133,19 +133,25 @@ onBeforeUnmount(() => {
       <SessionsPanel v-if="sessionsOpen" @close="sessionsOpen = false" @new="newSession" />
       <main class="main">
         <TranscriptView />
-        <div v-if="app.activePending.length" class="attention">
-          <div class="attention-inner">
-            <template v-for="p in app.activePending" :key="p.id">
-              <QuestionCard v-if="p.kind === 'question'" :request="p" />
-              <PermissionCard v-else :request="p" />
-            </template>
+        <Transition name="rise">
+          <div v-if="app.activePending.length" class="attention">
+            <TransitionGroup name="rise" tag="div" class="attention-inner">
+              <component
+                :is="p.kind === 'question' ? QuestionCard : PermissionCard"
+                v-for="p in app.activePending"
+                :key="p.id"
+                :request="p"
+              />
+            </TransitionGroup>
           </div>
-        </div>
+        </Transition>
         <Composer />
       </main>
       <SidePanel v-if="panelOpen" @close="panelOpen = false" />
     </div>
-    <SettingsView v-if="settingsOpen" @close="settingsOpen = false" />
+    <Transition name="settings">
+      <SettingsView v-if="settingsOpen" @close="settingsOpen = false" />
+    </Transition>
     <Toast />
   </div>
 </template>
@@ -159,8 +165,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 .body {
-  --sessions-w: 250px;
-  --panel-w: 320px;
+  --sessions-w: 256px;
+  --panel-w: 324px;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -185,21 +191,36 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   max-height: 50%;
   overflow-y: auto;
-  padding: 10px 18px;
+  padding: 12px 24px;
   border-top: 1px solid var(--border);
   background: var(--bg);
 }
 .attention-inner {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-width: 900px;
+  gap: 10px;
+  max-width: 860px;
   margin: 0 auto;
+}
+.settings-enter-from,
+.settings-leave-to {
+  opacity: 0;
+  transform: translateY(calc(6px * var(--m)));
+}
+.settings-enter-active {
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+.settings-leave-active {
+  transition:
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
 }
 @media (max-width: 960px) {
   .body {
-    --sessions-w: 220px;
-    --panel-w: 280px;
+    --sessions-w: 224px;
+    --panel-w: 288px;
   }
 }
 </style>

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { Message, ToolResultBlock } from "../api/types";
+import { useAuraState } from "../composables/auraState";
 import { useAppStore } from "../stores/app";
 import { basename, shortPath } from "../utils/format";
+import Aura from "./Aura.vue";
 import MessageItem from "./MessageItem.vue";
 
 const app = useAppStore();
+const aura = useAuraState();
 /** Header line: title and directory of the active session (per-session store, see stores/app.ts). */
 const active = computed(() => app.activeSummary ?? app.session);
 const title = computed(() => {
@@ -44,6 +47,20 @@ const streamingItems = computed<Message[]>(() =>
 );
 const streamedChars = computed(() => Object.values(app.streaming).reduce((n, t) => n + t.length, 0));
 const isEmpty = computed(() => visible.value.length === 0 && streamingItems.value.length === 0);
+
+/** Empty-state copy follows the Aura: the screen says what the glasses would do next. */
+const emptyCopy = computed(() => {
+  switch (aura.value.state) {
+    case "off":
+      return { head: "Die Brille ist gerade nicht dran.", sub: "Verbinden, dann einmal tippen und sprechen." };
+    case "listening":
+      return { head: "Ich höre zu.", sub: "Sprich einfach; nach der Stille kommt das Transkript ins Seitenpanel." };
+    default:
+      return active.value
+        ? { head: "Ich höre zu, sobald du tippst.", sub: "Einmal auf die Brille tippen und sprechen, oder unten schreiben." }
+        : { head: "Noch keine Session.", sub: "Links mit „+“ einen Projektordner wählen. Terminal-Sessions melden sich über die Hooks." };
+  }
+});
 
 function onScroll(): void {
   const el = scroller.value;
@@ -92,23 +109,25 @@ onBeforeUnmount(() => observer?.disconnect());
 <template>
   <div class="wrap">
     <div v-if="active" class="session-line">
-      <span class="session-title ellipsis" :title="title">{{ title }}</span>
+      <h1 class="session-title display ellipsis" :title="title">{{ title }}</h1>
       <span class="mono muted session-cwd ellipsis" :title="active.cwd">{{ shortPath(active.cwd, 64) }}</span>
     </div>
     <div ref="scroller" class="scroller" @scroll.passive="onScroll">
       <div v-if="isEmpty" class="empty">
-        <p class="headline">Keine Nachrichten</p>
-        <p class="muted">
-          Starte eine Session über die Seitenleiste oder unten, oder nutze die Brille: einmal tippen, sprechen, fertig.
-          Externe Terminal-Sessions melden sich über die Hooks.
-        </p>
+        <Aura :size="64" />
+        <p class="headline display">{{ emptyCopy.head }}</p>
+        <p class="muted sub">{{ emptyCopy.sub }}</p>
       </div>
       <div v-else ref="list" class="list">
-        <MessageItem v-for="m in visible" :key="String(m.id)" :message="m" :results="results" />
-        <MessageItem v-for="m in streamingItems" :key="'stream:' + m.id" :message="m" :results="results" streaming />
+        <TransitionGroup name="rise">
+          <MessageItem v-for="m in visible" :key="String(m.id)" :message="m" :results="results" />
+          <MessageItem v-for="m in streamingItems" :key="'stream:' + m.id" :message="m" :results="results" streaming />
+        </TransitionGroup>
       </div>
     </div>
-    <button v-if="!atBottom && !isEmpty" class="btn btn-sm jump" @click="scrollToBottom(true)">Zum Ende</button>
+    <Transition name="rise">
+      <button v-if="!atBottom && !isEmpty" class="btn btn-sm jump" @click="scrollToBottom(true)">Zum Ende ↓</button>
+    </Transition>
   </div>
 </template>
 
@@ -124,23 +143,24 @@ onBeforeUnmount(() => observer?.disconnect());
   flex-shrink: 0;
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  height: 32px;
-  padding: 0 18px;
-  line-height: 32px;
+  gap: 12px;
+  height: 44px;
+  padding: 0 24px;
+  line-height: 44px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   min-width: 0;
 }
 .session-title {
+  margin: 0;
+  font-size: var(--fs-lg);
   font-weight: 600;
-  font-size: 13px;
   flex: 0 1 auto;
   max-width: 60%;
 }
 .session-cwd {
   flex: 1 1 0;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   min-width: 0;
 }
 .scroller {
@@ -149,32 +169,55 @@ onBeforeUnmount(() => observer?.disconnect());
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 18px 12px;
+  padding: 22px 24px 16px;
 }
 .list {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  max-width: 900px;
+  gap: 18px;
+  max-width: 860px;
   margin: 0 auto;
 }
+/* New messages rise in; removed ones (session switch) just go. */
+.list :deep(.rise-leave-active) {
+  transition: none;
+  position: absolute;
+  opacity: 0;
+}
 .empty {
-  max-width: 420px;
-  margin: 18vh auto 0;
-  text-align: center;
+  max-width: 440px;
+  margin: 14vh auto 0;
+  padding-left: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.empty .aura {
+  margin-bottom: 18px;
 }
 .headline {
-  margin: 0 0 6px;
-  font-weight: 600;
-}
-.empty p {
   margin: 0;
+  font-size: var(--fs-2xl);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.sub {
+  margin: 4px 0 0;
+  font-size: var(--fs-md);
+  text-wrap: pretty;
 }
 .jump {
   position: absolute;
   left: 50%;
-  bottom: 10px;
+  bottom: 12px;
   transform: translateX(-50%);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow);
+}
+.jump.rise-enter-from,
+.jump.rise-leave-to {
+  transform: translateX(-50%) translateY(calc(6px * var(--m)));
 }
 </style>

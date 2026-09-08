@@ -19,18 +19,6 @@ const stopped = computed(() => props.session.status === "stopped");
 const displayTitle = computed(() => props.session.title?.trim() || basename(props.session.cwd));
 const statusText = computed(() => SESSION_STATUS_LABEL[props.session.status] ?? props.session.status);
 const when = computed(() => fmtRelative(props.session.last_active, props.now));
-const dotClass = computed(() => {
-  switch (props.session.status) {
-    case "running":
-      return "accent pulse";
-    case "waiting":
-      return "warn";
-    case "idle":
-      return "ok";
-    default:
-      return "";
-  }
-});
 
 function activate(): void {
   if (editing.value || busy.value) return;
@@ -82,7 +70,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
 </script>
 
 <template>
-  <li class="item" :class="{ active, stopped, busy, open: menuOpen }">
+  <li class="item" :class="[session.status, { active, stopped, busy, open: menuOpen }]">
     <div
       class="main"
       role="button"
@@ -94,7 +82,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
       @dblclick="startEdit"
       @keydown="onKey"
     >
-      <span class="dot" :class="dotClass" :aria-label="statusText"></span>
+      <span class="bar" aria-hidden="true"></span>
       <div class="text">
         <div class="line">
           <input
@@ -123,6 +111,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
       class="btn btn-sm btn-icon btn-ghost more"
       :class="{ on: menuOpen }"
       title="Aktionen"
+      aria-label="Aktionen"
       aria-haspopup="menu"
       :aria-expanded="menuOpen"
       @click.stop="menuOpen = !menuOpen"
@@ -150,16 +139,16 @@ const remove = () => act(() => app.deleteSession(props.session.id));
   position: relative;
   display: flex;
   align-items: stretch;
-  border-radius: var(--radius);
+  border-radius: var(--r-ctl);
   min-width: 0;
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .item:hover,
 .item.open {
   background: var(--panel-2);
 }
 .item.active {
-  background: var(--accent-dim);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--panel-2);
 }
 .item.busy {
   opacity: 0.6;
@@ -168,18 +157,33 @@ const remove = () => act(() => app.deleteSession(props.session.id));
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 7px 4px 7px 10px;
+  align-items: stretch;
+  gap: 10px;
+  padding: 7px 4px 7px 8px;
   cursor: pointer;
-  border-radius: var(--radius);
+  border-radius: var(--r-ctl);
 }
 .main:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.main .dot {
-  margin-top: 5px;
+/* Activity bar: a slim status line instead of a border around the row. */
+.bar {
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color var(--dur) var(--ease-out);
+}
+.item.running .bar {
+  background: var(--run);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.item.waiting .bar {
+  background: var(--warn);
+}
+.item.idle .bar {
+  background: var(--ok);
 }
 .item.stopped .title {
   color: var(--muted);
@@ -199,18 +203,23 @@ const remove = () => act(() => app.deleteSession(props.session.id));
 }
 .title {
   flex: 1;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 19px;
+}
+.item.active .title {
+  color: var(--text);
+  font-weight: 600;
 }
 .rename {
   flex: 1;
-  height: 20px;
-  padding: 0 5px;
-  font-size: 13px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: var(--fs-sm);
 }
 .sub {
-  font-size: 11.5px;
-  line-height: 15px;
+  font-size: var(--fs-xs);
+  line-height: 16px;
 }
 .dir {
   flex: 1;
@@ -220,25 +229,11 @@ const remove = () => act(() => app.deleteSession(props.session.id));
   white-space: nowrap;
   flex-shrink: 0;
 }
-.badge {
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 8px;
-  background: var(--warn);
-  color: #0f1115;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
 .more {
   align-self: center;
   margin-right: 4px;
   opacity: 0;
-  transition: opacity 0.1s;
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .item:hover .more,
 .item:focus-within .more,

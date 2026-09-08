@@ -13,6 +13,7 @@ const showRaw = ref(false);
 const edit = ref(props.transcript.cleaned);
 const busy = ref(false);
 const reviewing = computed(() => props.transcript.status === "reviewing");
+const sent = computed(() => props.transcript.status === "sent");
 const sameText = computed(() => props.transcript.raw.trim() === props.transcript.cleaned.trim());
 /** Cleanup failed (sidecar flag) or was a no-op: the raw text is what gets delivered. */
 const unfiltered = computed(() => props.transcript.cleaned_ok === false || sameText.value);
@@ -30,6 +31,15 @@ watch(
 );
 const edited = computed(() => edit.value !== props.transcript.cleaned);
 
+/** The check pops only when this item is seen going from review to sent; older items just show it. */
+const pop = ref(false);
+watch(
+  () => props.transcript.status,
+  (n, o) => {
+    if (o === "reviewing" && n === "sent") pop.value = true;
+  },
+);
+
 const statusClass = computed(() => {
   switch (props.transcript.status) {
     case "reviewing":
@@ -44,7 +54,7 @@ const statusClass = computed(() => {
 });
 
 const deadline = computed(() => toMillis(props.transcript.review_deadline_ts));
-/** Full bar = the configured review window, or the actual window if the sidecar granted more. */
+/** Full ring = the configured review window, or the actual window if the sidecar granted more. */
 const total = computed(() => {
   const configured = (settings.settings?.stt.review_delay_s ?? 0) * 1000;
   const start = toMillis(props.transcript.ts);
@@ -54,6 +64,10 @@ const total = computed(() => {
 const remainingMs = computed(() => (Number.isNaN(deadline.value) ? 0 : Math.max(0, deadline.value - props.now)));
 const pct = computed(() => Math.max(0, Math.min(100, (remainingMs.value / total.value) * 100)));
 const remainingLabel = computed(() => (remainingMs.value / 1000).toFixed(1).replace(".", ",") + " s");
+const iso = computed(() => {
+  const ms = toMillis(props.transcript.ts);
+  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
+});
 
 async function sendNow(): Promise<void> {
   if (busy.value) return;
@@ -71,12 +85,17 @@ async function cancel(): Promise<void> {
 </script>
 
 <template>
-  <article class="item" :class="{ reviewing }">
+  <article class="item" :class="{ reviewing, [transcript.status]: true }">
     <div class="meta">
-      <span class="chip" :class="statusClass">{{ TRANSCRIPT_STATUS_LABEL[transcript.status] ?? transcript.status }}</span>
+      <span v-if="sent" class="check" :class="{ pop }" aria-hidden="true">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.5 6.5l2.3 2.3L9.5 3.5" />
+        </svg>
+      </span>
+      <span class="status" :class="statusClass">{{ TRANSCRIPT_STATUS_LABEL[transcript.status] ?? transcript.status }}</span>
       <span v-if="targetLabel" class="muted target ellipsis" :title="`Ziel: ${targetLabel}`">→ {{ targetLabel }}</span>
       <span class="spacer"></span>
-      <time class="muted time">{{ fmtDateTime(transcript.ts) }}</time>
+      <time class="muted time" :datetime="iso">{{ fmtDateTime(transcript.ts) }}</time>
     </div>
 
     <template v-if="reviewing">
@@ -88,14 +107,24 @@ async function cancel(): Promise<void> {
         aria-label="Transkript bearbeiten"
         @keydown.ctrl.enter.prevent="sendNow"
       ></textarea>
-      <div class="countdown" role="progressbar" :aria-valuenow="Math.round(pct)" aria-valuemin="0" aria-valuemax="100">
-        <div class="bar" :style="{ width: pct + '%' }"></div>
-      </div>
       <div class="actions">
         <button class="btn btn-sm btn-primary" :disabled="busy" title="Ctrl+Enter" @click="sendNow">Jetzt senden</button>
         <button class="btn btn-sm" :disabled="busy" @click="cancel">Abbrechen</button>
         <span class="spacer"></span>
-        <span class="muted remaining">{{ remainingLabel }}</span>
+        <span
+          class="countdown"
+          role="progressbar"
+          :aria-valuenow="Math.round(pct)"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-label="`Sendet in ${remainingLabel}`"
+        >
+          <svg class="ring" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="track" cx="12" cy="12" r="10" pathLength="100" />
+            <circle class="fill" cx="12" cy="12" r="10" pathLength="100" :style="{ strokeDashoffset: 100 - pct }" />
+          </svg>
+          <span class="muted remaining">{{ remainingLabel }}</span>
+        </span>
       </div>
       <div v-if="unfiltered" class="foot muted">ungefiltert – Textbereinigung übersprungen</div>
     </template>
@@ -115,38 +144,93 @@ async function cancel(): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
+  padding: 10px 16px 12px;
   min-width: 0;
+  border-top: 1px solid var(--border);
+  transition: background-color var(--dur) var(--ease-out);
 }
+.item:first-child {
+  border-top: 0;
+}
+/* The item under review is the one editable thing in the list: it becomes a box with a warm edge. */
 .item.reviewing {
-  border-color: rgba(224, 175, 104, 0.45);
+  margin: 4px 8px 8px;
+  padding: 10px 12px 12px;
+  border-top: 0;
+  border-radius: var(--r-panel);
+  background: var(--bg);
+  box-shadow:
+    0 0 0 1px var(--warn-edge),
+    0 0 20px -6px color-mix(in oklch, var(--warn) 45%, transparent);
+}
+.item.reviewing + .item {
+  border-top: 0;
+}
+.item.cancelled .text,
+.item.failed .text {
+  color: var(--muted);
 }
 .meta {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  font-size: var(--fs-xs);
 }
-.meta .chip {
+.status {
+  font-weight: 600;
+  color: var(--muted);
+}
+.status.ok {
+  color: var(--ok);
+}
+.status.warn {
+  color: var(--warn);
+}
+.status.err {
+  color: var(--err);
+}
+.check {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--ok);
   flex-shrink: 0;
 }
+.check svg {
+  width: 100%;
+  height: 100%;
+}
+.check.pop {
+  animation: pop 420ms var(--ease-out);
+}
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(calc(1 - 0.6 * var(--m)));
+  }
+  60% {
+    transform: scale(calc(1 + 0.25 * var(--m)));
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 .target {
-  font-size: 12px;
   min-width: 0;
 }
 .time {
-  font-size: 12px;
   white-space: nowrap;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .text {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
 }
 .text.raw {
   color: var(--muted);
@@ -156,29 +240,44 @@ async function cancel(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
-}
-.countdown {
-  height: 3px;
-  background: var(--border);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.bar {
-  height: 100%;
-  background: var(--warn);
-  transition: width 0.1s linear;
+  font-size: var(--fs-xs);
 }
 .actions {
   display: flex;
   align-items: center;
   gap: 6px;
 }
+.countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ring {
+  width: 18px;
+  height: 18px;
+  transform: rotate(-90deg);
+}
+.ring circle {
+  fill: none;
+  stroke-width: 2.5;
+}
+.ring .track {
+  stroke: var(--border-strong);
+}
+.ring .fill {
+  stroke: var(--warn);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  transition: stroke-dashoffset 100ms linear;
+}
 .remaining {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+  min-width: 3.2em;
+  text-align: right;
 }
 .textarea {
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  background: var(--panel);
 }
 </style>

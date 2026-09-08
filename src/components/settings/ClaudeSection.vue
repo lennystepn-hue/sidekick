@@ -92,11 +92,10 @@ const st = useSettingsStore();
 
 <style scoped>
 .sub {
-  margin: 16px 0 6px;
-  font-size: 11.5px;
+  margin: 22px 0 4px;
+  font-family: var(--display);
+  font-size: var(--fs-md);
   font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--text);
 }
 </style>

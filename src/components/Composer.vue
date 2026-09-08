@@ -45,11 +45,21 @@ watch(
 const statusDot = computed(() => {
   switch (status.value) {
     case "running":
-      return "accent pulse";
+      return "run pulse";
     case "waiting":
       return "warn";
     case "idle":
       return "ok";
+    default:
+      return "";
+  }
+});
+const statusChip = computed(() => {
+  switch (status.value) {
+    case "running":
+      return "run";
+    case "waiting":
+      return "warn";
     default:
       return "";
   }
@@ -104,17 +114,29 @@ function onKey(e: KeyboardEvent): void {
       <template v-if="session && (live || resumable)">
         <span class="dot" :class="statusDot"></span>
         <span class="mono cwd ellipsis" :title="session.cwd">{{ shortPath(session.cwd, 60) }}</span>
-        <span class="chip" :class="{ warn: status === 'waiting' }">{{ status ? SESSION_STATUS_LABEL[status] : "" }}</span>
+        <span class="chip" :class="statusChip">{{ status ? SESSION_STATUS_LABEL[status] : "" }}</span>
         <span v-if="session.model" class="muted model ellipsis" :title="session.model">{{ session.model }}</span>
         <span class="spacer"></span>
         <button v-if="running" class="btn btn-sm" @click="app.interrupt()">Unterbrechen</button>
         <button v-if="live" class="btn btn-sm btn-danger" @click="app.stopSession()">Session beenden</button>
       </template>
       <template v-else>
-        <input v-model="cwd" class="input mono cwd-input" placeholder="Arbeitsverzeichnis" @keydown.enter="start" />
-        <button class="btn btn-sm" title="Ordner wählen" @click="pick">Ordner…</button>
-        <input v-model="model" class="input model-input" placeholder="Modell (leer = Standard)" @keydown.enter="start" />
-        <button class="btn btn-sm btn-primary" :disabled="!cwd.trim() || starting" @click="start">
+        <input
+          v-model="cwd"
+          class="input mono cwd-input"
+          placeholder="Arbeitsverzeichnis"
+          aria-label="Arbeitsverzeichnis"
+          @keydown.enter="start"
+        />
+        <button class="btn" title="Ordner wählen" @click="pick">Ordner…</button>
+        <input
+          v-model="model"
+          class="input model-input"
+          placeholder="Modell (leer = Standard)"
+          aria-label="Modell"
+          @keydown.enter="start"
+        />
+        <button class="btn btn-primary" :disabled="!cwd.trim() || starting" @click="start">
           {{ starting ? "Starte…" : "Session starten" }}
         </button>
       </template>
@@ -126,6 +148,7 @@ function onKey(e: KeyboardEvent): void {
         v-model="text"
         class="textarea"
         rows="1"
+        aria-label="Nachricht an Claude"
         :placeholder="
           resumable
             ? 'Session ist beendet – fortsetzen, um weiterzuschreiben (Enter)'
@@ -167,10 +190,10 @@ function onKey(e: KeyboardEvent): void {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--panel);
-  padding: 8px 12px 10px;
+  padding: 10px 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .session {
   display: flex;
@@ -178,14 +201,15 @@ function onKey(e: KeyboardEvent): void {
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-  min-height: 24px;
+  min-height: 26px;
+  font-size: var(--fs-sm);
 }
 .cwd {
   color: var(--muted);
   min-width: 0;
 }
 .model {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   max-width: 180px;
 }
 .cwd-input {
@@ -193,7 +217,7 @@ function onKey(e: KeyboardEvent): void {
   min-width: 160px;
 }
 .model-input {
-  width: 170px;
+  width: 180px;
   flex-shrink: 1;
 }
 .row {
@@ -206,12 +230,14 @@ function onKey(e: KeyboardEvent): void {
   min-height: var(--control-h);
   max-height: 180px;
   resize: none;
+  border-radius: 10px;
 }
 .note {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
 }
 .note p {
   margin: 0;

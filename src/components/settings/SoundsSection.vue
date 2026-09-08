@@ -29,27 +29,21 @@ const LABEL: Record<SoundName, string> = {
 
 <style scoped>
 .intro {
-  margin: 0 0 8px;
-  font-size: 13px;
+  margin: 0 0 10px;
+  font-size: var(--fs-sm);
 }
 .list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
 }
 .row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-.row:last-child {
-  border-bottom: 0;
+  padding: 5px 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
 }
 .name {
   min-width: 150px;

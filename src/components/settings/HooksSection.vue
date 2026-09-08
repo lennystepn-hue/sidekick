@@ -119,8 +119,9 @@ async function copy(): Promise<void> {
 
 <style scoped>
 .intro {
-  margin: 0 0 6px;
-  font-size: 13px;
+  margin: 0 0 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
 }
 .file {
   max-width: 360px;
@@ -131,7 +132,7 @@ async function copy(): Promise<void> {
   flex-basis: 100%;
 }
 .manual {
-  margin-top: 10px;
+  margin-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;

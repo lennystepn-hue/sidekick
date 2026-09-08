@@ -21,10 +21,10 @@ async function decide(decision: PermissionDecision): Promise<void> {
 </script>
 
 <template>
-  <section class="card" aria-live="polite">
+  <section class="card" :class="{ waiting: busy === null }" aria-live="polite">
     <header class="head">
-      <span class="dot warn pulse"></span>
-      <strong>Freigabe erforderlich</strong>
+      <span class="dot warn" :class="{ pulse: busy === null }"></span>
+      <h3 class="heading display">Freigabe erforderlich</h3>
       <span class="tool mono">{{ request.tool_name }}</span>
       <span class="spacer"></span>
       <time class="muted ts">{{ fmtTime(request.ts) }}</time>
@@ -50,7 +50,7 @@ async function decide(decision: PermissionDecision): Promise<void> {
         Immer erlauben
       </button>
       <button class="btn btn-danger" :disabled="busy !== null" @click="decide('deny')">Ablehnen</button>
-      <span v-if="busy" class="muted">Sende…</span>
+      <span v-if="busy" class="muted sending">Sende…</span>
     </footer>
   </section>
 </template>
@@ -60,24 +60,37 @@ async function decide(decision: PermissionDecision): Promise<void> {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px 12px;
+  padding: 12px 16px 14px;
   background: var(--panel);
-  border: 1px solid rgba(224, 175, 104, 0.45);
-  border-left: 3px solid var(--warn);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
   min-width: 0;
+  transition:
+    border-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+/* The warm edge only while the card actually waits for a decision. */
+.card.waiting {
+  border-color: var(--warn-edge);
+  box-shadow: 0 0 26px -8px color-mix(in oklch, var(--warn) 50%, transparent);
 }
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
+}
+.heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
 }
 .tool {
   color: var(--warn);
 }
 .ts {
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
 }
 .title,
 .desc {
@@ -88,9 +101,15 @@ async function decide(decision: PermissionDecision): Promise<void> {
 }
 .details summary {
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   user-select: none;
+  width: fit-content;
+  border-radius: 4px;
+}
+.details summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .details pre {
   margin-top: 6px;
@@ -101,6 +120,9 @@ async function decide(decision: PermissionDecision): Promise<void> {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 2px;
+  margin-top: 4px;
+}
+.sending {
+  font-size: var(--fs-xs);
 }
 </style>

@@ -5,7 +5,7 @@ import TranscriptItem from "./TranscriptItem.vue";
 
 const app = useAppStore();
 
-/** Shared clock for the countdown bars; one interval for the whole list. */
+/** Shared clock for the countdown rings; one interval for the whole list. */
 const now = ref(Date.now());
 let timer: number | null = null;
 onMounted(() => {
@@ -18,10 +18,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="list">
-    <p v-if="!app.transcripts.length" class="empty muted">
-      Noch keine Transkripte. Einmal auf die Brille tippen und sprechen.
-    </p>
-    <TranscriptItem v-for="t in app.transcripts" :key="t.id" :transcript="t" :now="now" />
+    <p v-if="!app.transcripts.length" class="empty muted">Noch nichts gehört. Einmal auf die Brille tippen und sprechen.</p>
+    <TransitionGroup name="rise">
+      <TranscriptItem v-for="t in app.transcripts" :key="t.id" :transcript="t" :now="now" />
+    </TransitionGroup>
   </div>
 </template>
 
@@ -29,11 +29,10 @@ onBeforeUnmount(() => {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  padding: 6px 0 12px;
 }
 .empty {
-  margin: 12px 4px;
-  font-size: 13px;
+  margin: 14px 16px;
+  font-size: var(--fs-sm);
 }
 </style>

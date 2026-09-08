@@ -53,34 +53,33 @@ onMounted(() => void app.loadGestureLog());
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .table-wrap {
   max-height: 240px;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--fs-xs);
 }
 th,
 td {
   text-align: left;
-  padding: 5px 10px;
+  padding: 6px 10px 6px 0;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 th {
   position: sticky;
   top: 0;
-  background: var(--panel-2);
+  background: var(--bg);
   color: var(--muted);
   font-weight: 500;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
 }
 tbody tr:last-child td {
   border-bottom: 0;

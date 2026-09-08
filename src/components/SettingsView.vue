@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useSettingsStore } from "../stores/settings";
 import { isTauri } from "../tauri";
 import AudioSection from "./settings/AudioSection.vue";
@@ -18,24 +18,27 @@ const st = useSettingsStore();
 interface Section {
   id: string;
   label: string;
+  lead: string;
 }
 const sections = computed<Section[]>(() =>
   [
-    { id: "gestures", label: "Gesten" },
-    { id: "audio", label: "Audio" },
-    { id: "stt", label: "Spracheingabe" },
-    { id: "tts", label: "Sprachausgabe" },
-    { id: "presence", label: "Anwesenheit" },
-    { id: "sounds", label: "Töne" },
-    ...(isTauri() ? [{ id: "system", label: "System" }] : []),
-    { id: "claude", label: "Claude" },
-    { id: "hooks", label: "Hooks" },
+    { id: "gestures", label: "Gesten", lead: "Was ein Tipp auf die Brille auslöst." },
+    { id: "audio", label: "Audio", lead: "Welches Gerät spricht, und wie laut die Töne sind." },
+    { id: "stt", label: "Spracheingabe", lead: "Wie aus Sprache Text wird, und wie lange du zum Prüfen hast." },
+    { id: "tts", label: "Sprachausgabe", lead: "Die Stimme, mit der Sidekick antwortet." },
+    { id: "presence", label: "Anwesenheit", lead: "Wann Sidekick dich am Rechner vermutet." },
+    { id: "sounds", label: "Töne", lead: "Kurze Signale für fertig, Fehler und Co." },
+    ...(isTauri() ? [{ id: "system", label: "System", lead: "Autostart und der Sidecar." }] : []),
+    { id: "claude", label: "Claude", lead: "Modelle, Freigaben und die Zustellung ohne Session." },
+    { id: "hooks", label: "Hooks", lead: "Claude Code im Terminal an Sidekick anschließen." },
   ] as Section[],
 );
 
 const active = ref("gestures");
 const content = ref<HTMLElement | null>(null);
+const closeBtn = ref<HTMLElement | null>(null);
 let programmatic = 0;
+let opener: HTMLElement | null = null;
 
 function jump(id: string): void {
   active.value = id;
@@ -64,17 +67,23 @@ function onScroll(): void {
 
 onMounted(() => {
   if (!st.loaded) void st.load();
+  // Dialog focus: land on "Schließen", go back to whatever opened the overlay.
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  closeBtn.value?.focus();
 });
+onBeforeUnmount(() => opener?.focus());
 </script>
 
 <template>
-  <div class="settings" role="dialog" aria-label="Einstellungen">
+  <div class="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <header class="head">
-      <h1>Einstellungen</h1>
-      <span v-if="st.saving" class="muted saving">speichert…</span>
+      <h1 id="settings-title" class="display">Einstellungen</h1>
+      <Transition name="rise">
+        <span v-if="st.saving" class="muted saving">speichert…</span>
+      </Transition>
       <span class="spacer"></span>
       <span class="muted hint">Esc schließt</span>
-      <button class="btn btn-sm" @click="emit('close')">Schließen</button>
+      <button ref="closeBtn" class="btn" @click="emit('close')">Schließen</button>
     </header>
 
     <div v-if="!st.settings" class="loading">
@@ -89,41 +98,20 @@ onMounted(() => {
         </button>
       </nav>
       <div ref="content" class="content" @scroll.passive="onScroll">
-        <section id="sec-gestures" class="section">
-          <h2>Gesten</h2>
-          <GesturesSection :settings="st.settings" />
-        </section>
-        <section id="sec-audio" class="section">
-          <h2>Audio</h2>
-          <AudioSection :settings="st.settings" />
-        </section>
-        <section id="sec-stt" class="section">
-          <h2>Spracheingabe</h2>
-          <SttSection :settings="st.settings" />
-        </section>
-        <section id="sec-tts" class="section">
-          <h2>Sprachausgabe</h2>
-          <TtsSection :settings="st.settings" />
-        </section>
-        <section id="sec-presence" class="section">
-          <h2>Anwesenheit</h2>
-          <PresenceSection :settings="st.settings" />
-        </section>
-        <section id="sec-sounds" class="section">
-          <h2>Töne</h2>
-          <SoundsSection />
-        </section>
-        <section v-if="isTauri()" id="sec-system" class="section">
-          <h2>System</h2>
-          <SystemSection />
-        </section>
-        <section id="sec-claude" class="section">
-          <h2>Claude</h2>
-          <ClaudeSection :settings="st.settings" />
-        </section>
-        <section id="sec-hooks" class="section">
-          <h2>Hooks</h2>
-          <HooksSection :settings="st.settings" />
+        <section v-for="s in sections" :id="`sec-${s.id}`" :key="s.id" class="section">
+          <header class="section-head">
+            <h2 class="display">{{ s.label }}</h2>
+            <p class="lead muted">{{ s.lead }}</p>
+          </header>
+          <GesturesSection v-if="s.id === 'gestures'" :settings="st.settings" />
+          <AudioSection v-else-if="s.id === 'audio'" :settings="st.settings" />
+          <SttSection v-else-if="s.id === 'stt'" :settings="st.settings" />
+          <TtsSection v-else-if="s.id === 'tts'" :settings="st.settings" />
+          <PresenceSection v-else-if="s.id === 'presence'" :settings="st.settings" />
+          <SoundsSection v-else-if="s.id === 'sounds'" />
+          <SystemSection v-else-if="s.id === 'system'" />
+          <ClaudeSection v-else-if="s.id === 'claude'" :settings="st.settings" />
+          <HooksSection v-else-if="s.id === 'hooks'" :settings="st.settings" />
         </section>
         <div class="tail"></div>
       </div>
@@ -143,61 +131,66 @@ onMounted(() => {
 .head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  height: 44px;
-  padding: 0 14px;
+  gap: 14px;
+  height: 50px;
+  padding: 0 16px 0 22px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   flex-shrink: 0;
 }
 h1 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--fs-xl);
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .saving,
 .hint {
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .loading {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 24px;
+  padding: 28px;
 }
 .body {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr);
+  grid-template-columns: 184px minmax(0, 1fr);
 }
 .nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 12px 8px;
+  padding: 16px 10px;
   border-right: 1px solid var(--border);
   background: var(--panel);
   overflow-y: auto;
 }
 .navitem {
   text-align: left;
-  height: 28px;
-  padding: 0 10px;
+  height: 30px;
+  padding: 0 12px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--r-ctl);
   background: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
 }
 .navitem:hover {
   color: var(--text);
   background: var(--panel-2);
 }
 .navitem.on {
-  color: var(--text);
-  background: var(--panel-2);
+  color: var(--accent);
+  background: var(--accent-dim);
 }
 .navitem:focus-visible {
   outline: 2px solid var(--accent);
@@ -207,23 +200,31 @@ h1 {
   /* offsetTop of the sections is measured from here, so nav jumps land on the heading. */
   position: relative;
   overflow-y: auto;
-  padding: 8px 24px 24px;
+  padding: 12px 40px 40px 36px;
 }
 .section {
-  max-width: 760px;
-  padding: 14px 0 18px;
-  border-bottom: 1px solid var(--border);
+  max-width: 720px;
+  padding: 28px 0 32px;
 }
-.section:last-of-type {
-  border-bottom: 0;
+.section + .section {
+  border-top: 1px solid var(--border);
+}
+.section-head {
+  margin-bottom: 14px;
 }
 h2 {
-  margin: 0 0 6px;
-  font-size: 14px;
+  margin: 0;
+  font-size: var(--fs-xl);
   font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.lead {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
 }
 .tail {
-  height: 32px;
+  height: 40px;
 }
 @media (max-width: 640px) {
   .body {
@@ -234,7 +235,10 @@ h2 {
     flex-wrap: wrap;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-    padding: 6px 8px;
+    padding: 8px 10px;
+  }
+  .content {
+    padding: 8px 20px 32px;
   }
 }
 </style>

@@ -49,10 +49,10 @@ async function deny(): Promise<void> {
 </script>
 
 <template>
-  <section class="card" aria-live="polite">
+  <section class="card" :class="{ waiting: !busy }" aria-live="polite">
     <header class="head">
-      <span class="dot warn pulse"></span>
-      <strong>Claude hat eine Frage</strong>
+      <span class="dot warn" :class="{ pulse: !busy }"></span>
+      <h3 class="heading display">Claude hat eine Frage</h3>
       <span class="spacer"></span>
       <time class="muted ts">{{ fmtTime(request.ts) }}</time>
     </header>
@@ -84,6 +84,7 @@ async function deny(): Promise<void> {
         class="input free"
         type="text"
         placeholder="Eigene Antwort…"
+        :aria-label="`Eigene Antwort: ${q.question}`"
         @keydown.enter.prevent="submit"
       />
     </div>
@@ -91,7 +92,7 @@ async function deny(): Promise<void> {
     <footer class="actions">
       <button class="btn btn-primary" :disabled="!complete || busy" @click="submit">Antworten</button>
       <button class="btn btn-danger" :disabled="busy" @click="deny">Ablehnen</button>
-      <span v-if="busy" class="muted">Sende…</span>
+      <span v-if="busy" class="muted sending">Sende…</span>
     </footer>
   </section>
 </template>
@@ -100,21 +101,33 @@ async function deny(): Promise<void> {
 .card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px 12px;
+  gap: 12px;
+  padding: 12px 16px 14px;
   background: var(--panel);
-  border: 1px solid rgba(224, 175, 104, 0.45);
-  border-left: 3px solid var(--warn);
-  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
   min-width: 0;
+  transition:
+    border-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+.card.waiting {
+  border-color: var(--warn-edge);
+  box-shadow: 0 0 26px -8px color-mix(in oklch, var(--warn) 50%, transparent);
 }
 .head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+.heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
 }
 .ts {
-  font-size: 11px;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
 }
 .question {
   display: flex;
@@ -131,7 +144,7 @@ async function deny(): Promise<void> {
   font-weight: 500;
 }
 .hint {
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .options {
   display: flex;
@@ -143,31 +156,41 @@ async function deny(): Promise<void> {
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  padding: 6px 10px;
+  padding: 7px 12px;
   background: var(--panel-2);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--r-ctl);
   color: var(--text);
   cursor: pointer;
   text-align: left;
   max-width: 100%;
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .option:hover {
-  border-color: #414a60;
+  border-color: color-mix(in oklch, var(--border-strong) 60%, var(--muted));
+}
+.option:active {
+  transform: translateY(calc(1px * var(--m)));
 }
 .option:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 .option.on {
   border-color: var(--accent);
   background: var(--accent-dim);
 }
+.option.on .label {
+  color: var(--accent);
+}
 .option .label {
   font-weight: 500;
 }
 .option .desc {
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .free {
   max-width: 420px;
@@ -176,5 +199,8 @@ async function deny(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.sending {
+  font-size: var(--fs-xs);
 }
 </style>

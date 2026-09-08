@@ -72,26 +72,36 @@ onBeforeUnmount(() => {
 .menu {
   position: fixed;
   z-index: 30;
-  min-width: 150px;
-  max-width: 240px;
-  padding: 4px;
+  min-width: 160px;
+  max-width: 250px;
+  padding: 5px;
   background: var(--panel-2);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transform-origin: top right;
+  animation: menu-in var(--dur-fast) var(--ease-out);
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-4px * var(--m))) scale(calc(1 - 0.03 * var(--m)));
+  }
 }
 .mi {
   text-align: left;
   background: none;
   border: 0;
-  border-radius: 4px;
-  padding: 5px 8px;
-  font-size: 13px;
+  border-radius: 6px;
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   color: var(--text);
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 .mi:hover,
 .mi:focus-visible {
@@ -101,9 +111,13 @@ onBeforeUnmount(() => {
 .mi.danger {
   color: var(--err);
 }
+.mi.danger:hover,
+.mi.danger:focus-visible {
+  background: var(--err-dim);
+}
 .confirm {
-  margin: 4px 6px 6px;
-  font-size: 12.5px;
+  margin: 6px 8px 8px;
+  font-size: var(--fs-sm);
 }
 .confirm-actions {
   display: flex;

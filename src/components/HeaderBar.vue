@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useAuraState } from "../composables/auraState";
 import { useAppStore } from "../stores/app";
-import { MODE_LABEL, PRESENCE_LABEL } from "../utils/format";
+import { PRESENCE_LABEL } from "../utils/format";
+import Aura from "./Aura.vue";
 
 defineProps<{ panelOpen: boolean; sessionsOpen: boolean }>();
 const emit = defineEmits<{ (e: "open-settings"): void; (e: "toggle-panel"): void; (e: "toggle-sessions"): void }>();
 
 const app = useAppStore();
 const s = computed(() => app.state);
+const aura = useAuraState();
 
-const glassesDot = computed(() => (s.value?.glasses === "connected" ? "ok" : ""));
 const glassesText = computed(() => {
   switch (s.value?.glasses) {
     case "connected":
@@ -26,16 +28,6 @@ const presenceText = computed(() => {
 });
 const output = computed(() => s.value?.audio.output_device ?? "");
 const routed = computed(() => s.value?.audio.routed_to_glasses === true);
-
-/** Activity indicator: only shown while something is going on (idle has no chip). */
-const activity = computed<{ text: string; cls: string; pulse: boolean } | null>(() => {
-  const m = s.value?.mode ?? "idle";
-  if (m === "idle") return null;
-  const text = MODE_LABEL[m];
-  if (m === "listening" || m === "btw_listening") return { text, cls: "accent", pulse: true };
-  if (m === "speaking") return { text, cls: "ok", pulse: true };
-  return { text, cls: "warn", pulse: m === "transcribing" };
-});
 
 const resetting = ref(false);
 /** The result (UAC cancelled, shutdown advice, …) arrives as a toast from the store. */
@@ -55,22 +47,28 @@ async function toggleGlasses(): Promise<void> {
   <header class="header">
     <div class="row">
       <button
-        class="btn btn-sm btn-icon btn-ghost"
+        class="btn btn-icon btn-ghost"
         :class="{ active: sessionsOpen }"
         :title="sessionsOpen ? 'Sessions ausblenden' : 'Sessions einblenden'"
+        :aria-label="sessionsOpen ? 'Sessions ausblenden' : 'Sessions einblenden'"
         :aria-pressed="sessionsOpen"
         @click="emit('toggle-sessions')"
       >
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+          <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
           <path d="M6 2.5v11" />
         </svg>
       </button>
-      <div class="glasses" :title="`Brille ${glassesText}`">
-        <span class="dot" :class="glassesDot"></span>
+
+      <div class="voice">
+        <Aura :size="22" />
+        <span class="word display" :class="aura.state" aria-live="polite">{{ aura.word }}</span>
+      </div>
+
+      <div class="glasses muted" :title="`Brille ${glassesText}`">
         <span class="name">{{ s?.glasses_name || "Brille" }}</span>
-        <span class="muted">{{ glassesText }}</span>
-        <span v-if="s?.battery != null" class="muted sep">{{ s.battery }} %</span>
+        <span class="sep">{{ glassesText }}</span>
+        <span v-if="s?.battery != null" class="sep tabular">{{ s.battery }} %</span>
       </div>
       <span v-if="s" class="muted sep presence" :title="'Anwesenheit: ' + presenceText">{{ presenceText }}</span>
       <span
@@ -83,25 +81,29 @@ async function toggleGlasses(): Promise<void> {
 
       <span class="spacer"></span>
 
-      <span v-if="activity" class="activity" :class="activity.cls" aria-live="polite">
-        <span class="dot" :class="[activity.cls, { pulse: activity.pulse }]"></span>
-        {{ activity.text }}
-      </span>
-
-      <button class="btn btn-sm" :class="{ active: app.isListening }" title="Ctrl+L" @click="app.toggleListen()">
+      <button class="btn listen" :class="{ active: app.isListening }" title="Ctrl+L" @click="app.toggleListen()">
+        <span v-if="app.isListening" class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
         {{ app.isListening ? "Zuhören beenden" : "Zuhören" }}
       </button>
-      <button class="btn btn-sm" @click="toggleGlasses">{{ app.glassesConnected ? "Trennen" : "Verbinden" }}</button>
-      <button class="btn btn-sm btn-ghost" @click="emit('open-settings')">Einstellungen</button>
+      <button class="btn" @click="toggleGlasses">{{ app.glassesConnected ? "Trennen" : "Verbinden" }}</button>
+      <button class="btn btn-icon btn-ghost" title="Einstellungen" aria-label="Einstellungen" @click="emit('open-settings')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <circle cx="8" cy="8" r="2.2" />
+          <path
+            d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"
+          />
+        </svg>
+      </button>
       <button
-        class="btn btn-sm btn-icon btn-ghost"
+        class="btn btn-icon btn-ghost"
         :class="{ active: panelOpen }"
         :title="panelOpen ? 'Seitenpanel ausblenden' : 'Seitenpanel einblenden'"
+        :aria-label="panelOpen ? 'Seitenpanel ausblenden' : 'Seitenpanel einblenden'"
         :aria-pressed="panelOpen"
         @click="emit('toggle-panel')"
       >
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+          <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
           <path d="M10 2.5v11" />
         </svg>
       </button>
@@ -136,60 +138,107 @@ async function toggleGlasses(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 44px;
-  padding: 0 12px;
+  height: 50px;
+  padding: 0 12px 0 10px;
   min-width: 0;
+}
+.voice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 6px 0 2px;
+  white-space: nowrap;
+}
+.word {
+  font-size: 15px;
+  color: var(--text);
+  transition: color var(--dur) var(--ease-out);
+}
+.word.waiting {
+  color: var(--warn);
+}
+.word.listening {
+  color: var(--accent);
+}
+.word.off {
+  color: var(--muted);
 }
 .glasses {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 0;
   white-space: nowrap;
+  font-size: var(--fs-sm);
+  min-width: 0;
 }
 .name {
-  font-weight: 600;
+  color: var(--text-2);
+  font-weight: 500;
 }
 .sep::before {
   content: "·";
-  margin-right: 8px;
+  margin: 0 7px;
   color: var(--border-strong);
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 .presence {
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .device {
-  max-width: 240px;
-  font-size: 12px;
+  max-width: 220px;
+  font-size: var(--fs-xs);
 }
 .device.routed {
-  color: var(--text);
-  opacity: 0.8;
+  color: var(--text-2);
 }
-.activity {
+
+/* Sound-wave indicator inside the listen button while listening. */
+.wave {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  margin-right: 4px;
-  font-size: 13px;
-  white-space: nowrap;
+  gap: 2px;
+  height: 12px;
 }
-.activity.accent {
-  color: var(--accent);
+.wave i {
+  display: block;
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: currentColor;
+  transform-origin: center;
+  animation: wave 1s ease-in-out infinite;
 }
-.activity.ok {
-  color: var(--ok);
+.wave i:nth-child(2) {
+  animation-delay: -0.75s;
 }
-.activity.warn {
-  color: var(--warn);
+.wave i:nth-child(3) {
+  animation-delay: -0.5s;
 }
+.wave i:nth-child(4) {
+  animation-delay: -0.25s;
+}
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(calc(1 - 0.7 * var(--m)));
+    opacity: 0.6;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
 .banner {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 32px;
-  padding: 4px 12px;
-  font-size: 13px;
+  min-height: 34px;
+  padding: 4px 14px;
+  font-size: var(--fs-sm);
   border-top: 1px solid var(--border);
   min-width: 0;
 }
@@ -204,13 +253,18 @@ async function toggleGlasses(): Promise<void> {
 .banner .btn {
   flex-shrink: 0;
 }
-@media (max-width: 860px) {
+@media (max-width: 1100px) {
   .device {
     display: none;
   }
 }
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .presence {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .glasses .sep:not(:first-child) {
     display: none;
   }
 }

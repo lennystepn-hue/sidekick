@@ -101,7 +101,7 @@ onMounted(load);
   font-size: 12px;
 }
 .devices {
-  margin-top: 8px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -119,21 +119,15 @@ onMounted(load);
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
 }
 .dev {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
   min-width: 0;
-}
-.dev:last-child {
-  border-bottom: 0;
 }
 .flow {
   width: 62px;
@@ -144,7 +138,8 @@ onMounted(load);
   flex: 1;
 }
 .empty {
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: 8px 0;
+  font-size: var(--fs-sm);
+  border-top: 1px solid var(--border);
 }
 </style>

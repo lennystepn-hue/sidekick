@@ -28,10 +28,10 @@ const reviewing = computed(() => app.reviewing.length);
 </script>
 
 <template>
-  <aside class="panel">
+  <aside class="panel" aria-label="Seitenpanel">
     <div class="tabs" role="tablist">
       <button
-        class="tab"
+        class="tab display"
         role="tab"
         :aria-selected="tab === 'transcripts'"
         :class="{ on: tab === 'transcripts' }"
@@ -40,12 +40,12 @@ const reviewing = computed(() => app.reviewing.length);
         Transkripte
         <span v-if="reviewing" class="badge">{{ reviewing }}</span>
       </button>
-      <button class="tab" role="tab" :aria-selected="tab === 'btw'" :class="{ on: tab === 'btw' }" @click="select('btw')">
+      <button class="tab display" role="tab" :aria-selected="tab === 'btw'" :class="{ on: tab === 'btw' }" @click="select('btw')">
         btw
       </button>
       <span class="spacer"></span>
-      <button class="btn btn-sm btn-icon btn-ghost" title="Panel ausblenden" @click="emit('close')">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+      <button class="btn btn-sm btn-icon btn-ghost" title="Panel ausblenden" aria-label="Panel ausblenden" @click="emit('close')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
           <path d="M4 4l8 8M12 4l-8 8" />
         </svg>
       </button>
@@ -68,49 +68,55 @@ const reviewing = computed(() => app.reviewing.length);
 .tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 6px 8px 0;
+  gap: 4px;
+  height: 44px;
+  padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 10px;
+  height: 44px;
+  padding: 0 8px;
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
   color: var(--muted);
   cursor: pointer;
-  font-size: 13px;
-  margin-bottom: -1px;
+  font-size: var(--fs-md);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transform: scaleX(calc(1 - 0.4 * var(--m)));
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur) var(--ease-out);
 }
 .tab:hover {
   color: var(--text);
 }
 .tab.on {
   color: var(--text);
-  border-bottom-color: var(--accent);
+}
+.tab.on::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 .tab:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
-  border-radius: 4px;
-}
-.badge {
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 8px;
-  background: var(--warn);
-  color: #0f1115;
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  outline-offset: -4px;
+  border-radius: var(--r-ctl);
 }
 .content {
   flex: 1;
