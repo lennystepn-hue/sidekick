@@ -55,6 +55,18 @@ def spoken_reply(text: str, limit: int = 900) -> str:
     return cut.rstrip() + "…"
 
 
+TOOL_VERBS = {
+    "Bash": "einen Befehl ausführen",
+    "PowerShell": "einen Befehl ausführen",
+    "Edit": "eine Datei ändern",
+    "MultiEdit": "eine Datei ändern",
+    "Write": "eine Datei schreiben",
+    "Read": "eine Datei lesen",
+    "WebFetch": "eine Webseite laden",
+    "WebSearch": "im Web suchen",
+}
+
+
 def short_value(value: Any, limit: int = 120) -> str:
     if isinstance(value, str):
         s = value.strip().replace("\n", " ")
@@ -117,13 +129,16 @@ class Summarizer:
                 if isinstance(value, str) and value.strip():
                     detail = short_value(value, 80)
                     break
-        verb = {
-            "Bash": "einen Befehl ausführen",
-            "Edit": "eine Datei ändern",
-            "MultiEdit": "eine Datei ändern",
-            "Write": "eine Datei schreiben",
-            "Read": "eine Datei lesen",
-            "WebFetch": "eine Webseite laden",
-            "WebSearch": "im Web suchen",
-        }.get(tool_name, f"das Werkzeug {tool_name} benutzen")
+        verb = TOOL_VERBS.get(tool_name, f"das Werkzeug {tool_name} benutzen")
+        return f"Claude möchte {verb}: {detail}. Erlauben?" if detail else f"Claude möchte {verb}. Erlauben?"
+
+    @staticmethod
+    def format_relay(tool_name: str, description: str, input_preview: str = "") -> str:
+        """Spoken form of a relayed permission prompt (Claude Code channels): the summary
+        when it says something, else the start of the arguments."""
+        verb = TOOL_VERBS.get(tool_name, f"das Werkzeug {tool_name} benutzen")
+        summary = (description or "").strip()
+        if not summary or summary.lower() in ("run shell command", "shell command"):
+            summary = (input_preview or "").strip()
+        detail = short_value(strip_markdown(summary), 120) if summary else ""
         return f"Claude möchte {verb}: {detail}. Erlauben?" if detail else f"Claude möchte {verb}. Erlauben?"

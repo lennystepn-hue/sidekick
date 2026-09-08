@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -98,8 +99,10 @@ class HookHandler:
         embedded_waiting: Callable[[], bool] | None = None,
         ignore_session_ids: Callable[[], set[str]] | None = None,
         quiet: Callable[[], bool] | None = None,
+        channel_cwds: Callable[[], set[str]] | None = None,
     ) -> None:
         self._quiet = quiet or (lambda: False)
+        self._channel_cwds = channel_cwds or (lambda: set())
         self._state = state
         self._bus = bus
         self._db = db
@@ -115,10 +118,13 @@ class HookHandler:
 
     # --- queries ---------------------------------------------------------
     def list_sessions(self) -> list[dict[str, Any]]:
-        return [
-            s.to_dict()
-            for s in sorted(self.sessions.values(), key=lambda s: (s.last_ts, s.seq), reverse=True)
-        ]
+        cwds = self._channel_cwds()
+        out = []
+        for s in sorted(self.sessions.values(), key=lambda s: (s.last_ts, s.seq), reverse=True):
+            d = s.to_dict()
+            d["channel"] = bool(s.cwd) and os.path.normcase(os.path.normpath(s.cwd)) in cwds
+            out.append(d)
+        return out
 
     def latest(self) -> ExternalSession | None:
         active = [s for s in self.sessions.values() if s.active and not s.adopted_by]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -68,3 +69,16 @@ def prompts_dir() -> Path:
 
 def bundled_models_dir() -> Path:
     return package_dir() / "models"
+
+
+def channel_script() -> Path:
+    """The bundled Sidekick channel server (channels/sidekick/dist/sidekick-channel.mjs).
+
+    Frozen builds ship it next to the sidecar under ``channel/``; from source it is the
+    repository's build output. ``SIDEKICK_CHANNEL_SCRIPT`` overrides both."""
+    override = os.environ.get("SIDEKICK_CHANNEL_SCRIPT")
+    if override:
+        return Path(override)
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "channel" / "sidekick-channel.mjs"
+    return Path(__file__).resolve().parents[2] / "channels" / "sidekick" / "dist" / "sidekick-channel.mjs"
