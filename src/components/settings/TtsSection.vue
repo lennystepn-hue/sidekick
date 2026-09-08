@@ -3,7 +3,7 @@ import { ref } from "vue";
 import type { Settings } from "../../api/types";
 import { useAppStore } from "../../stores/app";
 import { useSettingsStore } from "../../stores/settings";
-import { checked, strFrom } from "../../utils/form";
+import { checked, numFrom, strFrom } from "../../utils/form";
 import SettingRow from "./SettingRow.vue";
 
 defineProps<{ settings: Settings }>();
@@ -69,6 +69,22 @@ async function clearKey(): Promise<void> {
       />
       aktiv
     </label>
+  </SettingRow>
+  <SettingRow
+    label="Ruhe nach eigener Eingabe"
+    hint="0 = aus. Hast du gerade selbst etwas geschickt, spielt Sidekick nur den Ton und liest nicht vor. Fragen und Freigaben werden immer vorgelesen."
+    input-id="t-quiet"
+  >
+    <input
+      id="t-quiet"
+      class="input narrow"
+      type="number"
+      min="0"
+      step="1"
+      :value="settings.tts.quiet_after_input_s"
+      @change="st.set('tts', 'quiet_after_input_s', Math.max(0, Math.round(numFrom($event, 0))))"
+    />
+    <span class="muted">Sekunden</span>
   </SettingRow>
   <SettingRow label="Test">
     <button class="btn btn-sm" @click="app.speak(TEST_SENTENCE)">Testsatz sprechen</button>

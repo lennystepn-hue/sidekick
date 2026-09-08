@@ -4,6 +4,7 @@ import { api, ApiError, WS_URL } from "../api/client";
 import { SidecarSocket } from "../api/ws";
 import {
   isBrainstorm,
+  isSnoozed,
   type AppState,
   type BtwExchange,
   type ExternalSession,
@@ -139,7 +140,10 @@ export const useAppStore = defineStore("app", () => {
   });
   const isListening = computed(() => state.value?.mode === "listening" || state.value?.mode === "btw_listening");
   const glassesConnected = computed(() => state.value?.glasses === "connected");
-  const waitingInput = computed(() => state.value?.attention === "waiting_input" || pending.value.length > 0);
+  /** Deferred ("Später") requests stay pending but do not count as waiting: the Aura stays calm until they wake. */
+  const waitingInput = computed(
+    () => state.value?.attention === "waiting_input" || pending.value.some((p) => !isSnoozed(p.snoozed_until)),
+  );
   const reviewing = computed(() => transcripts.value.filter((t) => t.status === "reviewing"));
   const trayColor = computed<TrayColor>(() => {
     const s = state.value;
@@ -263,6 +267,11 @@ export const useAppStore = defineStore("app", () => {
   function removePending(id: string): void {
     pending.value = pending.value.filter((p) => p.id !== id);
   }
+  /** Marks a pending request as deferred until `until` (unix seconds) or, with null, as awake again. */
+  function setSnooze(id: string, until: number | null): void {
+    const p = pending.value.find((x) => x.id === id);
+    if (p) p.snoozed_until = until;
+  }
 
   // ---------- websocket events ----------
   /** Lets other stores react to events (e.g. the settings store to `settings`). Returns an unsubscribe. */
@@ -316,6 +325,12 @@ export const useAppStore = defineStore("app", () => {
         break;
       case "permission_resolved":
         removePending(ev.data.id);
+        break;
+      case "permission_deferred":
+        setSnooze(ev.data.id, ev.data.until);
+        break;
+      case "permission_woken":
+        setSnooze(ev.data.id, null);
         break;
       case "btw_answer":
         upsertBtw(ev.data);
@@ -597,10 +612,17 @@ export const useAppStore = defineStore("app", () => {
       const target = id ?? activeSessionId.value;
       return target ? api.sessionInterruptById(target) : api.sessionInterrupt();
     }, "Session");
+  /** "defer" and "wake" keep the request in the list; the `permission_deferred` / `permission_woken` events confirm. */
   const resolvePermission = (id: string, decision: PermissionDecision, extra: Omit<PermissionResolution, "decision"> = {}) =>
     run(async () => {
-      await api.sessionPermission(id, { decision, ...extra });
-      removePending(id);
+      const r = await api.sessionPermission(id, { decision, ...extra });
+      if (decision === "defer") {
+        if (typeof r?.until === "number") setSnooze(id, r.until);
+      } else if (decision === "wake") {
+        setSnooze(id, null);
+      } else {
+        removePending(id);
+      }
     }, "Freigabe");
 
   const toggleListen = (mode?: "main" | "btw") => run(() => api.listenToggle(mode), "Zuhören");
@@ -674,6 +696,36 @@ export const useAppStore = defineStore("app", () => {
       "Sessions",
       { silent: true },
     );
+  /**
+   * Forks a terminal session into a new Sidekick session (the sidecar activates it). Its history is
+   * fetched rather than assumed empty, in case the fork carries the terminal's transcript.
+   */
+  const adoptExternal = (id: string) =>
+    run(async () => {
+      const s = await api.sessionAdopt({ session_id: id });
+      applySummary(s);
+      setActive(s.id);
+      void ensureMessages(s.id, true);
+      void loadExternalSessions();
+      return s;
+    }, "Übernehmen");
+  /** Quiets the terminal's permission prompt until `until`; the row shows it and offers "Jetzt". */
+  const deferExternal = (id: string) =>
+    run(async () => {
+      const r = await api.externalDefer(id);
+      const e = externalSessions.value.find((x) => x.session_id === id);
+      if (e && typeof r?.until === "number") e.snoozed_until = r.until;
+      void loadExternalSessions();
+      return r;
+    }, "Später");
+  const wakeExternal = (id: string) =>
+    run(async () => {
+      const r = await api.externalWake(id);
+      const e = externalSessions.value.find((x) => x.session_id === id);
+      if (e) e.snoozed_until = null;
+      void loadExternalSessions();
+      return r;
+    }, "Jetzt");
 
   return {
     // state
@@ -760,6 +812,9 @@ export const useAppStore = defineStore("app", () => {
     hooksStatus,
     loadGestureLog,
     loadExternalSessions,
+    adoptExternal,
+    deferExternal,
+    wakeExternal,
   };
 });
 

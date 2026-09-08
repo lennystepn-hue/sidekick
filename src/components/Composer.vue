@@ -2,7 +2,6 @@
 import { computed, ref, watch } from "vue";
 import { useAppStore } from "../stores/app";
 import { useSettingsStore } from "../stores/settings";
-import { isWaiting } from "../api/types";
 import { pickDirectory } from "../tauri";
 import { SESSION_STATUS_LABEL, shortPath } from "../utils/format";
 
@@ -181,14 +180,13 @@ function onKey(e: KeyboardEvent): void {
         Keine eingebettete Session. Spracheingaben landen in der Zwischenablage; der Ton „bereit zum Einfügen“
         bestätigt das, dann Strg+V im Terminal.
       </p>
-      <p v-if="app.externalSessions.length" class="ext">
-        <span>{{ app.externalSessions.length }} externe Session{{ app.externalSessions.length === 1 ? "" : "s" }}:</span>
-        <span v-for="e in app.externalSessions" :key="e.session_id" class="mono ext-item" :title="e.cwd">
-          {{ shortPath(e.cwd, 44) }}<span v-if="isWaiting(e.attention)" class="chip warn">wartet</span>
-        </span>
+      <!-- Terminal sessions live in the sidebar's "Terminal" group; here only a pointer. -->
+      <p v-if="app.externalSessions.length && !ended" class="muted">
+        {{ app.externalSessions.length === 1 ? "Eine Terminal-Session" : `${app.externalSessions.length} Terminal-Sessions` }}
+        in der Seitenleiste unter „Terminal“ – dort mit einem Klick übernehmen.
       </p>
       <p v-else-if="!ended" class="muted">
-        Keine externen Sessions gemeldet. Hooks lassen sich unter Einstellungen → Hooks installieren.
+        Keine Terminal-Sessions gemeldet. Hooks lassen sich unter Einstellungen → Hooks installieren.
       </p>
     </div>
   </div>
@@ -263,18 +261,6 @@ function onKey(e: KeyboardEvent): void {
 }
 .note p {
   margin: 0;
-}
-.ext {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  align-items: center;
-}
-.ext-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
 }
 @media (max-width: 720px) {
   .model-input {

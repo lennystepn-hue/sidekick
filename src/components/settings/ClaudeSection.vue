@@ -43,6 +43,22 @@ const st = useSettingsStore();
       <option value="bypassPermissions">Nie fragen (alles erlauben)</option>
     </select>
   </SettingRow>
+  <SettingRow
+    label="Später = Minuten"
+    hint="So lange ist eine zurückgestellte Freigabe still, dann meldet sie sich wieder."
+    input-id="c-defer"
+  >
+    <input
+      id="c-defer"
+      class="input narrow"
+      type="number"
+      min="1"
+      step="1"
+      :value="settings.claude.defer_minutes"
+      @change="st.set('claude', 'defer_minutes', Math.max(1, Math.round(numFrom($event, 10))))"
+    />
+    <span class="muted">Minuten</span>
+  </SettingRow>
   <SettingRow label="Session-Modell" hint="Leer = Claude-Code-Standard." input-id="c-sess">
     <input
       id="c-sess"
