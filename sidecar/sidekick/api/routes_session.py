@@ -89,6 +89,7 @@ async def send_to_session(body: SendBody, services: Services = Depends(get_servi
     active = services.session
     if active is None or not active.running:
         raise HTTPException(status_code=409, detail="Keine laufende Session")
+    services.note_user_input()
     await active.send(body.text)
     return {"ok": True}
 

@@ -26,6 +26,12 @@ class RenameBody(BaseModel):
     title: str
 
 
+class AdoptBody(BaseModel):
+    session_id: str
+    cwd: str | None = None
+    title: str | None = None
+
+
 class SendBody(BaseModel):
     text: str
 
@@ -74,6 +80,23 @@ async def create_session(body: CreateBody, services: Services = Depends(get_serv
         save_settings(services.settings_path, services.settings)
     except OSError:
         pass
+    return session.summary()
+
+
+@router.post("/sessions/adopt")
+async def adopt_session(body: AdoptBody, services: Services = Depends(get_services)) -> dict[str, Any]:
+    external = services.hooks.sessions.get(body.session_id) if services.hooks is not None else None
+    cwd = body.cwd or (external.cwd if external else "")
+    if not cwd:
+        raise HTTPException(status_code=404, detail="Unbekannte Terminal-Session")
+    try:
+        session = await _manager(services).adopt(body.session_id, str(Path(cwd).expanduser()), body.title)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Session konnte nicht übernommen werden: {exc}") from exc
+    if services.hooks is not None:
+        services.hooks.mark_adopted(body.session_id, session.session_id)
     return session.summary()
 
 
@@ -143,6 +166,7 @@ async def send_to_session(
     session = _manager(services).get(session_id)
     if session is None or not session.running:
         raise HTTPException(status_code=409, detail="Session läuft nicht")
+    services.note_user_input()
     await session.send(body.text)
     return {"ok": True}
 

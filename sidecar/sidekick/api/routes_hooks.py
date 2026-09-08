@@ -55,6 +55,21 @@ async def external_sessions(services: Services = Depends(get_services)) -> list[
     return services.hooks.list_sessions()
 
 
+@router.post("/sessions/external/{session_id}/defer")
+async def defer_external(session_id: str, services: Services = Depends(get_services)) -> dict[str, Any]:
+    until = services.hooks.defer(session_id, services.settings.claude.defer_minutes)
+    if until is None:
+        raise HTTPException(status_code=404, detail="Keine offene Anfrage in dieser Terminal-Session")
+    return {"ok": True, "until": until}
+
+
+@router.post("/sessions/external/{session_id}/wake")
+async def wake_external(session_id: str, services: Services = Depends(get_services)) -> dict[str, Any]:
+    if not services.hooks.wake(session_id, announce=False):
+        raise HTTPException(status_code=404, detail="Nichts zurückgestellt")
+    return {"ok": True}
+
+
 @router.get("/hooks/events")
 async def hook_events(limit: int = 50, services: Services = Depends(get_services)) -> list[dict[str, Any]]:
     return services.db.list_hook_events(limit)

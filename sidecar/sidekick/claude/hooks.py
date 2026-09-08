@@ -62,6 +62,13 @@ class ExternalSession:
     active: bool = True
     last_summary: str = ""
     seq: int = 0  # ordering tie-breaker (time.time() resolution on Windows is ~15 ms)
+    adopted_by: str | None = None  # Sidekick session that forked this one; announcements muted
+    snoozed_until: float | None = None
+    last_prompt: str = ""
+
+    @property
+    def snoozed(self) -> bool:
+        return self.snoozed_until is not None and self.snoozed_until > time.time()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +79,9 @@ class ExternalSession:
             "last_ts": self.last_ts,
             "attention": self.attention,
             "active": self.active,
+            "adopted_by": self.adopted_by,
+            "snoozed_until": self.snoozed_until,
+            "last_prompt": self.last_prompt,
         }
 
 
@@ -87,7 +97,9 @@ class HookHandler:
         settings: Callable[[], Settings],
         embedded_waiting: Callable[[], bool] | None = None,
         ignore_session_ids: Callable[[], set[str]] | None = None,
+        quiet: Callable[[], bool] | None = None,
     ) -> None:
+        self._quiet = quiet or (lambda: False)
         self._state = state
         self._bus = bus
         self._db = db
@@ -109,10 +121,67 @@ class HookHandler:
         ]
 
     def latest(self) -> ExternalSession | None:
-        active = [s for s in self.sessions.values() if s.active]
+        active = [s for s in self.sessions.values() if s.active and not s.adopted_by]
         if not active:
             return None
         return max(active, key=lambda s: (s.last_ts, s.seq))
+
+    def waiting(self) -> ExternalSession | None:
+        """The external session whose prompt is open and not deferred, newest first."""
+        open_ = [
+            s
+            for s in self.sessions.values()
+            if s.active and s.attention and not s.snoozed and not s.adopted_by
+        ]
+        if not open_:
+            return None
+        return max(open_, key=lambda s: (s.last_ts, s.seq))
+
+    # --- adoption / deferral --------------------------------------------
+    def mark_adopted(self, session_id: str, by: str | None) -> None:
+        session = self.sessions.get(session_id)
+        if session is not None:
+            session.adopted_by = by
+            session.attention = False if by else session.attention
+            self._refresh_state()
+
+    def defer(self, session_id: str, minutes: int) -> float | None:
+        session = self.sessions.get(session_id)
+        if session is None or not session.attention:
+            return None
+        session.snoozed_until = time.time() + 60 * max(1, minutes)
+        self._bus.publish(
+            "permission_deferred",
+            {"id": session_id, "session_id": session_id, "until": session.snoozed_until},
+        )
+        self._refresh_state()
+        return session.snoozed_until
+
+    def wake(self, session_id: str, announce: bool = False) -> bool:
+        session = self.sessions.get(session_id)
+        if session is None or session.snoozed_until is None:
+            return False
+        session.snoozed_until = None
+        self._bus.publish("permission_woken", {"id": session_id, "session_id": session_id})
+        if announce and session.attention and session.active and session.last_prompt:
+            self._sounds.play("needs_input")
+            self._speaker.speak(session.last_prompt, kind="needs_input")
+        self._refresh_state()
+        return True
+
+    def tick_snoozes(self, now: float | None = None) -> list[str]:
+        now = time.time() if now is None else now
+        woken = [
+            s.session_id
+            for s in self.sessions.values()
+            if s.snoozed_until is not None and s.snoozed_until <= now
+        ]
+        for sid in woken:
+            self.wake(sid, announce=True)
+        return woken
+
+    def wake_all_snoozed(self) -> list[str]:
+        return self.tick_snoozes(now=float("inf"))
 
     # --- handling --------------------------------------------------------
     async def handle(self, event: str | None, payload: dict[str, Any]) -> None:
@@ -159,6 +228,9 @@ class HookHandler:
             return "Session beendet"
         if event == "UserPromptSubmit":
             session.attention = False
+            session.snoozed_until = None
+            if session.adopted_by:
+                session.adopted_by = None  # the user is typing in the terminal again
             return "Eingabe gesendet"
         if event == "Stop":
             return await self._on_stop(session, payload)
@@ -170,10 +242,16 @@ class HookHandler:
 
     async def _on_stop(self, session: ExternalSession, payload: dict[str, Any]) -> str:
         session.attention = False
+        session.snoozed_until = None
+        if session.adopted_by:
+            return "Fertig (in Sidekick übernommen)"
         text = str(payload.get("last_assistant_message") or "").strip()
         if not text:
             text = last_assistant_text(session.transcript_path) or ""
         self._sounds.play("done")
+        if self._quiet():
+            log.info("quiet period: not reading the summary for %s", session.session_id)
+            return "Fertig (still, du warst gerade selbst dran)"
         summary = await self._summarizer.summarize(text)
         session.last_summary = summary
         self._speaker.speak(summary, kind="done")
@@ -205,7 +283,14 @@ class HookHandler:
                 f"{session.session_id}:{ntype}:{hashlib.sha1(spoken.encode()).hexdigest()[:8]}"
             ):
                 return ""
+        return self._announce(session, spoken)
+
+    def _announce(self, session: ExternalSession, spoken: str) -> str:
         session.attention = True
+        session.snoozed_until = None
+        session.last_prompt = spoken
+        if session.adopted_by:
+            return spoken
         self._sounds.play("needs_input")
         self._speaker.speak(spoken, kind="needs_input")
         return spoken
@@ -216,11 +301,8 @@ class HookHandler:
         keys = self._perm_keys(session.session_id, payload.get("tool_use_id"), tool_name, tool_input)
         if self._duplicate(*keys):
             return ""
-        session.attention = True
         spoken = self._summarizer.format_permission(tool_name, tool_input)
-        self._sounds.play("needs_input")
-        self._speaker.speak(spoken, kind="needs_input")
-        return spoken
+        return self._announce(session, spoken)
 
     # --- helpers ---------------------------------------------------------
     @staticmethod
@@ -246,7 +328,10 @@ class HookHandler:
     def refresh_state(self) -> None:
         """Recompute attention/external session count (also called by the embedded session)."""
         active = [s for s in self.sessions.values() if s.active]
-        waiting = any(s.attention for s in active) or self._embedded_waiting()
+        waiting = (
+            any(s.attention and not s.snoozed and not s.adopted_by for s in active)
+            or self._embedded_waiting()
+        )
         self._state.update(
             external_sessions=len(active),
             attention="waiting_input" if waiting else "none",
