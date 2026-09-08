@@ -2,7 +2,7 @@
 
 Ziel: Lenny spricht (über die Brille) oder tippt mit einem Brainstorm-Partner über eine Idee. Der Partner fragt nach, schlägt Optionen vor, hält Entscheidungen fest und pflegt einen strukturierten Ideen-Stand. Wenn genug klar ist, legt Sidekick ein Projekt an: Ordner, alle wichtigen Markdown-Dateien, Git-Init, und startet auf Wunsch direkt eine Claude-Code-Session mit einem Kickoff-Prompt.
 
-Entscheidungen von Lenny: Projektordner `C:\Users\ender\Projects` (wird angelegt), Partner-Modell Opus 5, keine automatische Wiederaufnahme des Mikros (jede Runde per Tap; als Einstellung vorhanden).
+Entscheidungen von Lenny: Projektordner `~\Projects` (wird angelegt), Partner-Modell Opus 5, keine automatische Wiederaufnahme des Mikros (jede Runde per Tap; als Einstellung vorhanden).
 
 ## 1. Konzept
 
@@ -80,7 +80,7 @@ WS: idea_state {session_id, state}
     materialize_progress {session_id, job_id, step, total, label, status: "running"|"done"|"error", message?, project_path?, code_session_id?}
 
 Settings += brainstorm {model: "claude-opus-5", docs_model: "claude-opus-5", speak_replies: true, auto_listen: false}
-            projects   {base_dir: "C:\\Users\\ender\\Projects", git_init: true, start_session_after_create: true}
+            projects   {base_dir: "~/Projects", git_init: true, start_session_after_create: true}
 ```
 
 ## 6. Sprache

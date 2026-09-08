@@ -13,3 +13,4 @@ __pycache__/
 .env
 src-tauri/binaries/*
 !src-tauri/binaries/.gitkeep
+.claude/launch.json

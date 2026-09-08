@@ -22,8 +22,8 @@ import type { AppStore } from "../stores/app";
 import { deepMerge, type SettingsStore } from "../stores/settings";
 import { basename } from "../utils/format";
 
-const CWD = "C:\\Users\\ender\\OneDrive\\Desktop\\Sidekick";
-const BLOG_CWD = "C:\\Users\\ender\\Projekte\\blog";
+const CWD = "C:\\Users\\dev\\Projects\\sidekick";
+const BLOG_CWD = "C:\\Users\\dev\\Projects\\blog";
 const SESSION_ID = "sess_demo_01";
 const BLOG_ID = "sess_demo_02";
 const NOTES_ID = "sess_demo_03";
@@ -31,8 +31,8 @@ const LAB_ID = "sess_demo_04";
 const IDEA_ID = "sess_demo_05";
 const MADE_ID = "sess_demo_06";
 const MADE_CODE_ID = "sess_demo_07";
-const PROJECTS_DIR = "C:\\Users\\ender\\Projects";
-const SCRATCH_DIR = "C:\\Users\\ender\\AppData\\Roaming\\Sidekick\\brainstorms";
+const PROJECTS_DIR = "C:\\Users\\dev\\Projects";
+const SCRATCH_DIR = "C:\\Users\\dev\\AppData\\Roaming\\Sidekick\\brainstorms";
 const iso = (secondsAgo: number): string => new Date(Date.now() - secondsAgo * 1000).toISOString();
 
 // ---------- sessions ----------
@@ -98,8 +98,8 @@ const shelfIdea: IdeaState = {
 const sessions: SessionSummary[] = [
   mkSession({ id: SESSION_ID, cwd: CWD, title: "Hook-Installer", status: "running", started_at: iso(1800), last_active: iso(5), message_count: 9 }),
   mkSession({ id: BLOG_ID, cwd: BLOG_CWD, title: "Blog-Relaunch", status: "waiting", model: "claude-sonnet-5", started_at: iso(5400), last_active: iso(130), message_count: 4 }),
-  mkSession({ id: NOTES_ID, cwd: "C:\\Users\\ender\\Projekte\\notizen", title: "", status: "idle", started_at: iso(2600), last_active: iso(1500), message_count: 2 }),
-  mkSession({ id: LAB_ID, cwd: "C:\\Users\\ender\\Projekte\\sidecar-lab", title: "Sidecar-Tests", status: "stopped", started_at: iso(100_000), last_active: iso(93_000), message_count: 3 }),
+  mkSession({ id: NOTES_ID, cwd: "C:\\Users\\dev\\Projects\\notizen", title: "", status: "idle", started_at: iso(2600), last_active: iso(1500), message_count: 2 }),
+  mkSession({ id: LAB_ID, cwd: "C:\\Users\\dev\\Projects\\sidecar-lab", title: "Sidecar-Tests", status: "stopped", started_at: iso(100_000), last_active: iso(93_000), message_count: 3 }),
   mkSession({ id: IDEA_ID, cwd: `${SCRATCH_DIR}\\${IDEA_ID}`, kind: "brainstorm", title: "Kaffeelog", status: "idle", model: "claude-opus-5", started_at: iso(2000), last_active: iso(240), message_count: 6, idea: coffeeIdea }),
   mkSession({ id: MADE_ID, cwd: `${SCRATCH_DIR}\\${MADE_ID}`, kind: "brainstorm", title: "Regalwächter", status: "idle", model: "claude-opus-5", started_at: iso(12_000), last_active: iso(7200), message_count: 4, idea: shelfIdea, project_path: `${PROJECTS_DIR}\\regalwaechter` }),
   mkSession({ id: MADE_CODE_ID, cwd: `${PROJECTS_DIR}\\regalwaechter`, title: "Regalwächter", status: "idle", started_at: iso(7100), last_active: iso(6900), message_count: 2 }),
