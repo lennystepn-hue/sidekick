@@ -4,7 +4,7 @@ import { useAppStore } from "../stores/app";
 import { useSettingsStore } from "../stores/settings";
 import { isWaiting } from "../api/types";
 import { pickDirectory } from "../tauri";
-import { shortPath } from "../utils/format";
+import { SESSION_STATUS_LABEL, shortPath } from "../utils/format";
 
 const app = useAppStore();
 const settingsStore = useSettingsStore();
@@ -13,6 +13,7 @@ const text = ref("");
 const cwd = ref("");
 const model = ref("");
 const starting = ref(false);
+const resuming = ref(false);
 const sending = ref(false);
 const area = ref<HTMLTextAreaElement | null>(null);
 
@@ -25,9 +26,24 @@ watch(
 );
 
 const session = computed(() => app.session);
-const running = computed(() => session.value?.status === "running");
+const status = computed(() => app.activeSummary?.status ?? session.value?.status ?? null);
+const running = computed(() => status.value === "running");
+/** Session is present and not stopped: the normal chat state. */
+const live = computed(() => app.hasEmbeddedSession);
+/** Stopped but resumable: the transcript stays, the send button turns into "Session fortsetzen". */
+const resumable = computed(() => app.canResume);
+/** Stopped for good: offer a new session in the same directory. */
+const ended = computed(() => session.value !== null && status.value === "stopped" && !resumable.value);
+watch(
+  ended,
+  (v) => {
+    if (v && session.value?.cwd) cwd.value = session.value.cwd;
+  },
+  { immediate: true },
+);
+
 const statusDot = computed(() => {
-  switch (session.value?.status) {
+  switch (status.value) {
     case "running":
       return "accent pulse";
     case "waiting":
@@ -38,12 +54,6 @@ const statusDot = computed(() => {
       return "";
   }
 });
-const STATUS_LABEL: Record<string, string> = {
-  idle: "bereit",
-  running: "arbeitet",
-  waiting: "wartet auf Eingabe",
-  stopped: "beendet",
-};
 
 async function pick(): Promise<void> {
   const dir = await pickDirectory(cwd.value || undefined);
@@ -52,8 +62,15 @@ async function pick(): Promise<void> {
 async function start(): Promise<void> {
   if (!cwd.value.trim() || starting.value) return;
   starting.value = true;
-  await app.startSession(cwd.value.trim(), model.value.trim() || undefined);
+  await app.createSession(cwd.value.trim(), model.value.trim() || undefined);
   starting.value = false;
+}
+async function resume(): Promise<void> {
+  const id = app.activeSessionId;
+  if (!id || resuming.value) return;
+  resuming.value = true;
+  await app.resumeSession(id);
+  resuming.value = false;
 }
 function autosize(): void {
   const el = area.value;
@@ -75,7 +92,8 @@ async function send(): Promise<void> {
 function onKey(e: KeyboardEvent): void {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
-    void send();
+    if (resumable.value) void resume();
+    else void send();
   }
 }
 </script>
@@ -83,14 +101,14 @@ function onKey(e: KeyboardEvent): void {
 <template>
   <div class="composer">
     <div class="session">
-      <template v-if="app.hasEmbeddedSession && session">
+      <template v-if="session && (live || resumable)">
         <span class="dot" :class="statusDot"></span>
         <span class="mono cwd ellipsis" :title="session.cwd">{{ shortPath(session.cwd, 60) }}</span>
-        <span class="chip">{{ STATUS_LABEL[session.status] ?? session.status }}</span>
+        <span class="chip" :class="{ warn: status === 'waiting' }">{{ status ? SESSION_STATUS_LABEL[status] : "" }}</span>
         <span v-if="session.model" class="muted model ellipsis" :title="session.model">{{ session.model }}</span>
         <span class="spacer"></span>
         <button v-if="running" class="btn btn-sm" @click="app.interrupt()">Unterbrechen</button>
-        <button class="btn btn-sm btn-danger" @click="app.stopSession()">Session beenden</button>
+        <button v-if="live" class="btn btn-sm btn-danger" @click="app.stopSession()">Session beenden</button>
       </template>
       <template v-else>
         <input v-model="cwd" class="input mono cwd-input" placeholder="Arbeitsverzeichnis" @keydown.enter="start" />
@@ -102,22 +120,32 @@ function onKey(e: KeyboardEvent): void {
       </template>
     </div>
 
-    <div v-if="app.hasEmbeddedSession" class="row">
+    <div v-if="live || resumable" class="row">
       <textarea
         ref="area"
         v-model="text"
         class="textarea"
         rows="1"
-        placeholder="Nachricht an Claude … (Enter sendet, Shift+Enter neue Zeile)"
-        :disabled="sending"
+        :placeholder="
+          resumable
+            ? 'Session ist beendet – fortsetzen, um weiterzuschreiben (Enter)'
+            : 'Nachricht an Claude … (Enter sendet, Shift+Enter neue Zeile)'
+        "
+        :disabled="sending || resuming"
         @input="autosize"
         @keydown="onKey"
       ></textarea>
-      <button class="btn btn-primary" :disabled="!text.trim() || sending" @click="send">Senden</button>
+      <button v-if="resumable" class="btn btn-primary" :disabled="resuming" @click="resume">
+        {{ resuming ? "Setze fort…" : "Session fortsetzen" }}
+      </button>
+      <button v-else class="btn btn-primary" :disabled="!text.trim() || sending" @click="send">Senden</button>
     </div>
 
     <div v-else class="note">
-      <p>
+      <p v-if="ended">
+        Diese Session ist beendet und kann nicht fortgesetzt werden. Oben startet eine neue Session im selben Ordner.
+      </p>
+      <p v-else>
         Keine eingebettete Session. Spracheingaben landen in der Zwischenablage; der Ton „bereit zum Einfügen“
         bestätigt das, dann Strg+V im Terminal.
       </p>
@@ -127,7 +155,9 @@ function onKey(e: KeyboardEvent): void {
           {{ shortPath(e.cwd, 44) }}<span v-if="isWaiting(e.attention)" class="chip warn">wartet</span>
         </span>
       </p>
-      <p v-else class="muted">Keine externen Sessions gemeldet. Hooks lassen sich unter Einstellungen → Hooks installieren.</p>
+      <p v-else-if="!ended" class="muted">
+        Keine externen Sessions gemeldet. Hooks lassen sich unter Einstellungen → Hooks installieren.
+      </p>
     </div>
   </div>
 </template>

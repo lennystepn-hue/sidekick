@@ -28,6 +28,21 @@ export interface Session {
   permission_mode?: string;
 }
 
+/** One entry of `GET /sessions`: every known session, including stopped ones from the database. */
+export interface SessionSummary extends Session {
+  mode: "embedded";
+  title: string;
+  permission_mode: string;
+  /** ISO timestamp of the last activity; the list is sorted by it (newest first). */
+  last_active: string;
+  sdk_session_id: string | null;
+  message_count: number;
+  /** Open permission requests / questions of this session. */
+  pending: number;
+  /** Stopped sessions with a known SDK session id can be resumed. */
+  resumable: boolean;
+}
+
 export interface BluetoothAdapterState {
   ok: boolean;
   problem_code: number | null;
@@ -49,7 +64,11 @@ export interface AppState {
   audio: AudioState;
   mode: Mode;
   attention: Attention;
+  /** Mirrors the active session (or null). */
   session: Session | null;
+  /** All known sessions, newest activity first. Every `state` event carries the full list. */
+  sessions: SessionSummary[];
+  active_session_id: string | null;
   bluetooth_adapter: BluetoothAdapterState;
   models: ModelsState;
   /** Number of external (hook-driven) terminal sessions the sidecar knows about. */

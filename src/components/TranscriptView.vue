@@ -2,9 +2,18 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { Message, ToolResultBlock } from "../api/types";
 import { useAppStore } from "../stores/app";
+import { basename, shortPath } from "../utils/format";
 import MessageItem from "./MessageItem.vue";
 
 const app = useAppStore();
+/** Header line: title and directory of the active session (per-session store, see stores/app.ts). */
+const active = computed(() => app.activeSummary ?? app.session);
+const title = computed(() => {
+  const s = active.value;
+  if (!s) return "";
+  const t = (s as { title?: string }).title?.trim();
+  return t || basename(s.cwd);
+});
 const scroller = ref<HTMLElement | null>(null);
 const list = ref<HTMLElement | null>(null);
 /** True while the view is pinned to the newest message; cleared when the user scrolls up. */
@@ -53,6 +62,15 @@ watch([() => app.messages.length, streamedChars], async () => {
   await nextTick();
   scrollToBottom();
 });
+// Switching sessions always lands at the newest message of the new one.
+watch(
+  () => app.activeSessionId,
+  async () => {
+    atBottom.value = true;
+    await nextTick();
+    scrollToBottom();
+  },
+);
 
 // Keep the pin when the scroller shrinks (attention cards, composer growth, window resize)
 // or the content grows (streaming text, expanded tool cards).
@@ -73,12 +91,16 @@ onBeforeUnmount(() => observer?.disconnect());
 
 <template>
   <div class="wrap">
+    <div v-if="active" class="session-line">
+      <span class="session-title ellipsis" :title="title">{{ title }}</span>
+      <span class="mono muted session-cwd ellipsis" :title="active.cwd">{{ shortPath(active.cwd, 64) }}</span>
+    </div>
     <div ref="scroller" class="scroller" @scroll.passive="onScroll">
       <div v-if="isEmpty" class="empty">
         <p class="headline">Keine Nachrichten</p>
         <p class="muted">
-          Starte unten eine Session oder nutze die Brille: einmal tippen, sprechen, fertig. Externe Terminal-Sessions
-          melden sich über die Hooks.
+          Starte eine Session über die Seitenleiste oder unten, oder nutze die Brille: einmal tippen, sprechen, fertig.
+          Externe Terminal-Sessions melden sich über die Hooks.
         </p>
       </div>
       <div v-else ref="list" class="list">
@@ -96,10 +118,35 @@ onBeforeUnmount(() => observer?.disconnect());
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
+}
+.session-line {
+  flex-shrink: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  height: 32px;
+  padding: 0 18px;
+  line-height: 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  min-width: 0;
+}
+.session-title {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 0 1 auto;
+  max-width: 60%;
+}
+.session-cwd {
+  flex: 1 1 0;
+  font-size: 12px;
+  min-width: 0;
 }
 .scroller {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 16px 18px 12px;

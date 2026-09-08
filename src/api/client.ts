@@ -20,6 +20,7 @@ import type {
   SecretName,
   SecretsStatus,
   Session,
+  SessionSummary,
   Settings,
   SettingsPatch,
   SoundName,
@@ -30,7 +31,7 @@ export const BASE_URL: string = (import.meta.env.VITE_SIDECAR_URL as string | un
   ?? "http://127.0.0.1:47821";
 export const WS_URL: string = BASE_URL.replace(/^http/, "ws") + "/ws";
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export class ApiError extends Error {
   constructor(
@@ -154,6 +155,22 @@ export const api = {
     request<{ ok: boolean }>("POST", `/session/permission/${id}`, resolution),
   sessionMessages: (limit = 200) => request<Message[]>("GET", `/session/messages${q({ limit })}`),
   externalSessions: () => request<ExternalSession[]>("GET", "/sessions/external"),
+
+  // sessions (multiple concurrent embedded sessions; `/session/*` above acts on the active one)
+  sessions: () => request<SessionSummary[]>("GET", "/sessions"),
+  sessionCreate: (cwd: string, model?: string, title?: string) =>
+    request<SessionSummary>("POST", "/sessions", { cwd, ...(model ? { model } : {}), ...(title ? { title } : {}) }),
+  sessionActivate: (id: string) => request<SessionSummary>("POST", `/sessions/${encodeURIComponent(id)}/activate`),
+  sessionResume: (id: string) => request<SessionSummary>("POST", `/sessions/${encodeURIComponent(id)}/resume`),
+  sessionStopById: (id: string) => request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/stop`),
+  sessionDelete: (id: string) => request<{ ok: boolean }>("DELETE", `/sessions/${encodeURIComponent(id)}`),
+  sessionRename: (id: string, title: string) =>
+    request<SessionSummary>("PATCH", `/sessions/${encodeURIComponent(id)}`, { title }),
+  sessionMessagesById: (id: string, limit = 200) =>
+    request<Message[]>("GET", `/sessions/${encodeURIComponent(id)}/messages${q({ limit })}`),
+  sessionSendTo: (id: string, text: string) =>
+    request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/send`, { text }),
+  sessionInterruptById: (id: string) => request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/interrupt`),
 
   // btw
   btw: (limit = 50) => request<BtwExchange[]>("GET", `/btw${q({ limit })}`),

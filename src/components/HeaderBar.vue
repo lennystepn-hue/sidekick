@@ -3,8 +3,8 @@ import { computed, ref } from "vue";
 import { useAppStore } from "../stores/app";
 import { MODE_LABEL, PRESENCE_LABEL } from "../utils/format";
 
-defineProps<{ panelOpen: boolean }>();
-const emit = defineEmits<{ (e: "open-settings"): void; (e: "toggle-panel"): void }>();
+defineProps<{ panelOpen: boolean; sessionsOpen: boolean }>();
+const emit = defineEmits<{ (e: "open-settings"): void; (e: "toggle-panel"): void; (e: "toggle-sessions"): void }>();
 
 const app = useAppStore();
 const s = computed(() => app.state);
@@ -54,6 +54,18 @@ async function toggleGlasses(): Promise<void> {
 <template>
   <header class="header">
     <div class="row">
+      <button
+        class="btn btn-sm btn-icon btn-ghost"
+        :class="{ active: sessionsOpen }"
+        :title="sessionsOpen ? 'Sessions ausblenden' : 'Sessions einblenden'"
+        :aria-pressed="sessionsOpen"
+        @click="emit('toggle-sessions')"
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+          <path d="M6 2.5v11" />
+        </svg>
+      </button>
       <div class="glasses" :title="`Brille ${glassesText}`">
         <span class="dot" :class="glassesDot"></span>
         <span class="name">{{ s?.glasses_name || "Brille" }}</span>

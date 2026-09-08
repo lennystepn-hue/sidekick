@@ -1,4 +1,4 @@
-import type { Mode, Presence, TranscriptStatus, TranscriptTarget } from "../api/types";
+import type { Mode, Presence, SessionStatus, TranscriptStatus, TranscriptTarget } from "../api/types";
 
 /** Accepts epoch seconds, epoch millis or ISO strings; returns epoch millis (NaN if unknown). */
 export function toMillis(v: number | string | null | undefined): number {
@@ -25,6 +25,35 @@ export function fmtDateTime(v: number | string | null | undefined): string {
   const time = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
   return sameDay ? time : `${d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} ${time}`;
 }
+
+/** Coarse "vor 3 Min." style relative time; `now` lets a list share one clock. */
+export function fmtRelative(v: number | string | null | undefined, now = Date.now()): string {
+  const ms = toMillis(v);
+  if (Number.isNaN(ms)) return "";
+  const s = Math.max(0, Math.round((now - ms) / 1000));
+  if (s < 45) return "gerade eben";
+  const m = Math.round(s / 60);
+  if (m < 60) return `vor ${m} Min.`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `vor ${h} Std.`;
+  const d = Math.round(h / 24);
+  if (d === 1) return "gestern";
+  if (d < 7) return `vor ${d} Tagen`;
+  return new Date(ms).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+}
+
+/** Last path segment ("C:\\a\\b\\" -> "b"). */
+export function basename(p: string): string {
+  const parts = p.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+export const SESSION_STATUS_LABEL: Record<SessionStatus, string> = {
+  idle: "bereit",
+  running: "arbeitet",
+  waiting: "wartet auf Eingabe",
+  stopped: "beendet",
+};
 
 export const MODE_LABEL: Record<Mode, string> = {
   idle: "bereit",

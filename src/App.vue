@@ -4,35 +4,39 @@ import Composer from "./components/Composer.vue";
 import HeaderBar from "./components/HeaderBar.vue";
 import PermissionCard from "./components/PermissionCard.vue";
 import QuestionCard from "./components/QuestionCard.vue";
+import SessionsPanel from "./components/SessionsPanel.vue";
 import SettingsView from "./components/SettingsView.vue";
 import SidePanel from "./components/SidePanel.vue";
 import Toast from "./components/Toast.vue";
 import TranscriptView from "./components/TranscriptView.vue";
 import { useAppStore } from "./stores/app";
 import { useSettingsStore } from "./stores/settings";
-import { onTrayCommand, setTrayState, type TrayCommand } from "./tauri";
+import { onTrayCommand, pickDirectory, setTrayState, type TrayCommand } from "./tauri";
 
 const app = useAppStore();
 const settings = useSettingsStore();
 
 const settingsOpen = ref(false);
-const panelOpen = ref(readPanel());
+const panelOpen = ref(readFlag("sidekick.panelOpen"));
+const sessionsOpen = ref(readFlag("sidekick.sessionsOpen"));
 let unlistenTray: (() => void) | null = null;
 
-function readPanel(): boolean {
+function readFlag(key: string): boolean {
   try {
-    return localStorage.getItem("sidekick.panelOpen") !== "0";
+    return localStorage.getItem(key) !== "0";
   } catch {
     return true;
   }
 }
-watch(panelOpen, (v) => {
+function persistFlag(key: string, v: boolean): void {
   try {
-    localStorage.setItem("sidekick.panelOpen", v ? "1" : "0");
+    localStorage.setItem(key, v ? "1" : "0");
   } catch {
     /* ignore */
   }
-});
+}
+watch(panelOpen, (v) => persistFlag("sidekick.panelOpen", v));
+watch(sessionsOpen, (v) => persistFlag("sidekick.sessionsOpen", v));
 
 // Tray colour follows the state: gray, blue (listening), yellow (waiting), green.
 watch(
@@ -49,10 +53,29 @@ watch(
   },
 );
 
+/** "+" in the sessions panel and Ctrl+Shift+N: pick a directory, then create and activate a session. */
+let creating = false;
+async function newSession(): Promise<void> {
+  if (creating) return;
+  creating = true;
+  try {
+    const initial = settings.settings?.claude.last_cwd || app.session?.cwd || undefined;
+    const dir = await pickDirectory(initial);
+    if (dir) await app.createSession(dir);
+  } finally {
+    creating = false;
+  }
+}
+
 function onKey(e: KeyboardEvent): void {
   if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "l") {
     e.preventDefault();
     void app.toggleListen();
+    return;
+  }
+  if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    void newSession();
     return;
   }
   if (e.key === "Escape") {
@@ -99,13 +122,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app">
-    <HeaderBar :panel-open="panelOpen" @open-settings="settingsOpen = true" @toggle-panel="panelOpen = !panelOpen" />
-    <div class="body" :class="{ 'with-panel': panelOpen }">
+    <HeaderBar
+      :panel-open="panelOpen"
+      :sessions-open="sessionsOpen"
+      @open-settings="settingsOpen = true"
+      @toggle-panel="panelOpen = !panelOpen"
+      @toggle-sessions="sessionsOpen = !sessionsOpen"
+    />
+    <div class="body" :class="{ 'with-sessions': sessionsOpen, 'with-panel': panelOpen }">
+      <SessionsPanel v-if="sessionsOpen" @close="sessionsOpen = false" @new="newSession" />
       <main class="main">
         <TranscriptView />
-        <div v-if="app.pending.length" class="attention">
+        <div v-if="app.activePending.length" class="attention">
           <div class="attention-inner">
-            <template v-for="p in app.pending" :key="p.id">
+            <template v-for="p in app.activePending" :key="p.id">
               <QuestionCard v-if="p.kind === 'question'" :request="p" />
               <PermissionCard v-else :request="p" />
             </template>
@@ -129,13 +159,21 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 .body {
+  --sessions-w: 250px;
+  --panel-w: 320px;
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
 }
+.body.with-sessions {
+  grid-template-columns: var(--sessions-w) minmax(0, 1fr);
+}
 .body.with-panel {
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) var(--panel-w);
+}
+.body.with-sessions.with-panel {
+  grid-template-columns: var(--sessions-w) minmax(0, 1fr) var(--panel-w);
 }
 .main {
   display: flex;
@@ -158,9 +196,10 @@ onBeforeUnmount(() => {
   max-width: 900px;
   margin: 0 auto;
 }
-@media (max-width: 820px) {
-  .body.with-panel {
-    grid-template-columns: minmax(0, 1fr) 280px;
+@media (max-width: 960px) {
+  .body {
+    --sessions-w: 220px;
+    --panel-w: 280px;
   }
 }
 </style>

@@ -12,6 +12,7 @@ import type {
   PermissionDecision,
   PermissionRequest,
   PermissionResolution,
+  SessionSummary,
   SoundName,
   SpokenEvent,
   Transcript,
@@ -39,6 +40,9 @@ const OFFLINE_GRACE_MS = 1500;
 const byTsDesc = <T extends { ts: string | number }>(list: T[]): T[] =>
   [...list].sort((a, b) => (toMillis(b.ts) || 0) - (toMillis(a.ts) || 0));
 
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_STREAMING: Record<string, string> = {};
+
 export const useAppStore = defineStore("app", () => {
   // ---------- state ----------
   const state = ref<AppState | null>(null);
@@ -49,9 +53,13 @@ export const useAppStore = defineStore("app", () => {
   /** True once /state has been loaded at least once. */
   const initialized = ref(false);
   const demo = ref(false);
-  const messages = ref<Message[]>([]);
-  /** Streaming assistant text by stream id (the `message_id` of `assistant_delta`). */
-  const streaming = ref<Record<string, string>>({});
+  /** Messages per session id, so switching is instant and events for background sessions are kept. */
+  const messagesBySession = ref<Record<string, Message[]>>({});
+  /** Streaming assistant text per session id, keyed by stream id (the `message_id` of `assistant_delta`). */
+  const streamingBySession = ref<Record<string, Record<string, string>>>({});
+  /** Sessions whose history was loaded via REST; live events alone do not make a session "loaded". */
+  const loadedSessions = new Set<string>();
+  const inflightLoads = new Map<string, Promise<void>>();
   const transcripts = ref<Transcript[]>([]);
   const btw = ref<BtwExchange[]>([]);
   const pending = ref<PermissionRequest[]>([]);
@@ -66,10 +74,39 @@ export const useAppStore = defineStore("app", () => {
   const listeners = new Set<(ev: WsEvent) => void>();
 
   // ---------- derived ----------
+  /** The active session (mirrored by the sidecar in `state.session`). */
   const session = computed(() => state.value?.session ?? null);
+  const sessions = computed<SessionSummary[]>(() => state.value?.sessions ?? []);
+  const activeSessionId = computed<string | null>(
+    () => state.value?.active_session_id ?? state.value?.session?.id ?? null,
+  );
+  const activeSummary = computed<SessionSummary | null>(
+    () => sessions.value.find((s) => s.id === activeSessionId.value) ?? null,
+  );
+  /** Messages / streaming text of the active session. */
+  const messages = computed<Message[]>(() => {
+    const id = activeSessionId.value;
+    return (id ? messagesBySession.value[id] : undefined) ?? EMPTY_MESSAGES;
+  });
+  const streaming = computed<Record<string, string>>(() => {
+    const id = activeSessionId.value;
+    return (id ? streamingBySession.value[id] : undefined) ?? EMPTY_STREAMING;
+  });
+  /** Only the active session's requests are shown as cards; the others get a badge in the sidebar. */
+  const activePending = computed(() => pending.value.filter((p) => p.session_id === activeSessionId.value));
+  const pendingBySession = computed<Record<string, number>>(() => {
+    const counts: Record<string, number> = {};
+    for (const p of pending.value) counts[p.session_id] = (counts[p.session_id] ?? 0) + 1;
+    return counts;
+  });
   const hasEmbeddedSession = computed(
     () => session.value !== null && session.value.mode === "embedded" && session.value.status !== "stopped",
   );
+  /** The active session is stopped but can be resumed in place. */
+  const canResume = computed(() => {
+    const s = activeSummary.value;
+    return s !== null && s.status === "stopped" && s.resumable;
+  });
   const isListening = computed(() => state.value?.mode === "listening" || state.value?.mode === "btw_listening");
   const glassesConnected = computed(() => state.value?.glasses === "connected");
   const waitingInput = computed(() => state.value?.attention === "waiting_input" || pending.value.length > 0);
@@ -101,13 +138,51 @@ export const useAppStore = defineStore("app", () => {
 
   // ---------- collection helpers ----------
   function upsertMessage(m: Message): void {
+    const sid = m.session_id || activeSessionId.value;
+    if (!sid) return;
+    const list = messagesBySession.value[sid] ?? (messagesBySession.value[sid] = []);
     const key = String(m.id);
-    const i = messages.value.findIndex((x) => String(x.id) === key);
-    if (i >= 0) messages.value[i] = m;
-    else messages.value.push(m);
+    const i = list.findIndex((x) => String(x.id) === key);
+    if (i >= 0) list[i] = m;
+    else list.push(m);
     // The final message replaces the streamed text that preceded it.
-    if (m.stream_id && m.stream_id in streaming.value) delete streaming.value[m.stream_id];
-    if (key in streaming.value) delete streaming.value[key];
+    const st = streamingBySession.value[sid];
+    if (st) {
+      if (m.stream_id && m.stream_id in st) delete st[m.stream_id];
+      if (key in st) delete st[key];
+      if (Object.keys(st).length === 0) delete streamingBySession.value[sid];
+    }
+  }
+  function appendDelta(sid: string, streamId: string, text: string): void {
+    const st = streamingBySession.value[sid] ?? (streamingBySession.value[sid] = {});
+    st[streamId] = (st[streamId] ?? "") + text;
+  }
+  function dropSessionData(id: string): void {
+    delete messagesBySession.value[id];
+    delete streamingBySession.value[id];
+    loadedSessions.delete(id);
+    pending.value = pending.value.filter((p) => p.session_id !== id);
+  }
+  /** Sessions that are gone from the list take their messages and open requests with them. */
+  function pruneSessions(known: Set<string>): void {
+    for (const id of Object.keys(messagesBySession.value)) if (!known.has(id)) dropSessionData(id);
+    for (const id of Object.keys(streamingBySession.value)) if (!known.has(id)) dropSessionData(id);
+    if (pending.value.some((p) => !known.has(p.session_id))) pending.value = pending.value.filter((p) => known.has(p.session_id));
+  }
+  /** Replaces or inserts a session in the list; keeps `state.session` in sync when it is the active one. */
+  function applySummary(s: SessionSummary): void {
+    const st = state.value;
+    if (!st) return;
+    const i = st.sessions.findIndex((x) => x.id === s.id);
+    if (i >= 0) st.sessions[i] = s;
+    else st.sessions.unshift(s);
+    if (st.active_session_id === s.id) st.session = s;
+  }
+  function setActive(id: string | null): void {
+    const st = state.value;
+    if (!st) return;
+    st.active_session_id = id;
+    st.session = id ? (st.sessions.find((x) => x.id === id) ?? null) : null;
   }
   function upsertTranscript(t: Transcript): void {
     const i = transcripts.value.findIndex((x) => x.id === t.id);
@@ -139,9 +214,22 @@ export const useAppStore = defineStore("app", () => {
     switch (ev.type) {
       case "state": {
         const prev = state.value;
-        state.value = ev.data;
-        // A session that went away takes its open permission requests with it.
-        if (prev?.session && !ev.data.session) pending.value = [];
+        const next = ev.data;
+        // Older sidecars send neither field: keep what we know and mirror the single session.
+        const hasList = Array.isArray(next.sessions);
+        if (!hasList) next.sessions = prev?.sessions ?? [];
+        if (next.active_session_id === undefined) next.active_session_id = next.session?.id ?? null;
+        state.value = next;
+        if (hasList) pruneSessions(new Set(next.sessions.map((s) => s.id)));
+        else if (prev?.session && !next.session) pending.value = [];
+        // A stopped session neither finishes its stream nor waits for input: drop partial text and requests.
+        const stopped = new Set(next.sessions.filter((s) => s.status === "stopped").map((s) => s.id));
+        for (const id of stopped) delete streamingBySession.value[id];
+        if (pending.value.some((p) => stopped.has(p.session_id))) {
+          pending.value = pending.value.filter((p) => !stopped.has(p.session_id));
+        }
+        const active = activeSessionId.value;
+        if (active && initialized.value && !loadedSessions.has(active)) void ensureMessages(active);
         break;
       }
       case "media_key":
@@ -151,9 +239,11 @@ export const useAppStore = defineStore("app", () => {
       case "transcript":
         upsertTranscript(ev.data);
         break;
-      case "assistant_delta":
-        streaming.value[ev.data.message_id] = (streaming.value[ev.data.message_id] ?? "") + ev.data.text;
+      case "assistant_delta": {
+        const sid = ev.data.session_id || activeSessionId.value;
+        if (sid) appendDelta(sid, ev.data.message_id, ev.data.text);
         break;
+      }
       case "message":
         upsertMessage(ev.data);
         break;
@@ -204,8 +294,9 @@ export const useAppStore = defineStore("app", () => {
       if (!isUnreachable(e)) notify(errorText(e), "error", "Sidecar");
       return false;
     }
-    const [sess, msgs, ts, b, ext] = await Promise.allSettled([
+    const [sess, list, msgs, ts, b, ext] = await Promise.allSettled([
       api.session(),
+      api.sessions(),
       api.sessionMessages(200),
       api.transcripts(50),
       api.btw(50),
@@ -216,12 +307,20 @@ export const useAppStore = defineStore("app", () => {
       if (!isMissing(r.reason)) notify(errorText(r.reason), "error", label);
       return fallback;
     };
-    state.value = s;
     const sessionInfo = pick(sess, { session: null, pending: [] }, "Session");
-    if (sessionInfo.session && s.session === null) state.value.session = sessionInfo.session;
+    if (sessionInfo.session && s.session === null) s.session = sessionInfo.session;
+    const sessionList = pick<SessionSummary[] | null>(list, null, "Sessions");
+    if (sessionList) s.sessions = sessionList;
+    else if (!Array.isArray(s.sessions)) s.sessions = [];
+    if (s.active_session_id === undefined) s.active_session_id = s.session?.id ?? null;
+    const active = s.active_session_id ?? s.session?.id ?? null;
+    state.value = s;
     pending.value = sessionInfo.pending ?? [];
-    messages.value = pick(msgs, [], "Nachrichten");
-    streaming.value = {};
+    // Only the active session's history is fresh after a (re)sync; the others reload on activation.
+    messagesBySession.value = active ? { [active]: pick(msgs, [], "Nachrichten") } : {};
+    streamingBySession.value = {};
+    loadedSessions.clear();
+    if (active) loadedSessions.add(active);
     transcripts.value = byTsDesc(pick(ts, [], "Transkripte"));
     btw.value = byTsDesc(pick(b, [], "btw"));
     externalSessions.value = pick(ext, [], "Sessions");
@@ -287,18 +386,107 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
-  const startSession = (cwd: string, model?: string) =>
+  /** Loads a session's history once (merging messages that already arrived live), unless `force`. */
+  async function ensureMessages(id: string, force = false): Promise<void> {
+    if (!force && loadedSessions.has(id)) return;
+    const running = inflightLoads.get(id);
+    if (running) return running;
+    const job = (async () => {
+      try {
+        const fetched = await api.sessionMessagesById(id, 200);
+        const merged = [...(fetched ?? [])];
+        const seen = new Set(merged.map((m) => String(m.id)));
+        for (const m of messagesBySession.value[id] ?? []) if (!seen.has(String(m.id))) merged.push(m);
+        messagesBySession.value[id] = merged;
+        loadedSessions.add(id);
+      } catch (e) {
+        if (!isMissing(e)) notify(errorText(e), "error", "Nachrichten");
+      } finally {
+        inflightLoads.delete(id);
+      }
+    })();
+    inflightLoads.set(id, job);
+    return job;
+  }
+
+  const createSession = (cwd: string, model?: string, title?: string) =>
     run(async () => {
-      const s = await api.sessionStart(cwd, model);
-      if (state.value) state.value.session = s;
-      messages.value = [];
-      streaming.value = {};
-      pending.value = [];
+      const s = await api.sessionCreate(cwd, model, title);
+      messagesBySession.value[s.id] = [];
+      delete streamingBySession.value[s.id];
+      loadedSessions.add(s.id);
+      applySummary(s);
+      setActive(s.id);
       return s;
     }, "Session");
-  const stopSession = () => run(() => api.sessionStop(), "Session");
-  const interrupt = () => run(() => api.sessionInterrupt(), "Session");
-  const sendText = (text: string) => run(() => api.sessionSend(text), "Senden");
+  /** Legacy name; `/session/start` creates a new session as well. */
+  const startSession = (cwd: string, model?: string) => createSession(cwd, model);
+
+  /** Switches the transcript immediately; the sidecar resumes a stopped session on activation. */
+  async function activateSession(id: string): Promise<SessionSummary | undefined> {
+    const prev = activeSessionId.value;
+    if (prev === id) {
+      void ensureMessages(id);
+      return activeSummary.value ?? undefined;
+    }
+    setActive(id);
+    void ensureMessages(id);
+    return run(async () => {
+      try {
+        const s = await api.sessionActivate(id);
+        applySummary(s);
+        setActive(s.id);
+        return s;
+      } catch (e) {
+        if (activeSessionId.value === id) setActive(prev);
+        throw e;
+      }
+    }, "Session");
+  }
+  const resumeSession = (id: string) =>
+    run(async () => {
+      const s = await api.sessionResume(id);
+      applySummary(s);
+      return s;
+    }, "Session");
+  /** Without an id the active session is stopped. */
+  const stopSession = (id?: string) =>
+    run(async () => {
+      const target = id ?? activeSessionId.value;
+      if (!target) return api.sessionStop();
+      const r = await api.sessionStopById(target);
+      const s = state.value?.sessions.find((x) => x.id === target);
+      if (s) applySummary({ ...s, status: "stopped" });
+      delete streamingBySession.value[target];
+      return r;
+    }, "Session");
+  const deleteSession = (id: string) =>
+    run(async () => {
+      const r = await api.sessionDelete(id);
+      const st = state.value;
+      if (st) {
+        st.sessions = st.sessions.filter((x) => x.id !== id);
+        if (st.active_session_id === id) setActive(null);
+      }
+      dropSessionData(id);
+      return r;
+    }, "Session");
+  const renameSession = (id: string, title: string) =>
+    run(async () => {
+      const s = await api.sessionRename(id, title);
+      applySummary(s);
+      return s;
+    }, "Session");
+  const sendToSession = (id: string, text: string) => run(() => api.sessionSendTo(id, text), "Senden");
+  const sendText = (text: string) => {
+    const id = activeSessionId.value;
+    return id ? sendToSession(id, text) : run(() => api.sessionSend(text), "Senden");
+  };
+  const interrupt = (id?: string) =>
+    run(() => {
+      const target = id ?? activeSessionId.value;
+      return target ? api.sessionInterruptById(target) : api.sessionInterrupt();
+    }, "Session");
   const resolvePermission = (id: string, decision: PermissionDecision, extra: Omit<PermissionResolution, "decision"> = {}) =>
     run(async () => {
       await api.sessionPermission(id, { decision, ...extra });
@@ -384,8 +572,8 @@ export const useAppStore = defineStore("app", () => {
     offline,
     initialized,
     demo,
-    messages,
-    streaming,
+    messagesBySession,
+    streamingBySession,
     transcripts,
     btw,
     pending,
@@ -395,7 +583,15 @@ export const useAppStore = defineStore("app", () => {
     lastSpoken,
     // derived
     session,
+    sessions,
+    activeSessionId,
+    activeSummary,
+    messages,
+    streaming,
+    activePending,
+    pendingBySession,
     hasEmbeddedSession,
+    canResume,
     isListening,
     glassesConnected,
     waitingInput,
@@ -411,8 +607,15 @@ export const useAppStore = defineStore("app", () => {
     handleEvent,
     subscribe,
     // actions
+    ensureMessages,
+    createSession,
     startSession,
+    activateSession,
+    resumeSession,
     stopSession,
+    deleteSession,
+    renameSession,
+    sendToSession,
     interrupt,
     sendText,
     resolvePermission,
