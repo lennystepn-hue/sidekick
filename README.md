@@ -37,7 +37,7 @@ pnpm tauri dev          # startet Vite, das Tauri-Fenster und den Sidecar
 
 Nur der Sidecar: `cd sidecar && uv run python -m sidekick` (mit `--fake` simuliert er die Brille). Nur die UI mit Beispieldaten: `pnpm dev` und `http://localhost:1420/?demo=1`.
 
-Tests: `cd sidecar && uv run pytest -q` (89 Tests, ohne Hardware, ohne Netz) und `pnpm typecheck`.
+Tests: `cd sidecar && uv run pytest -q` (107 Tests, ohne Hardware, ohne Netz) und `pnpm typecheck`.
 
 ## Als App auf dem Desktop
 

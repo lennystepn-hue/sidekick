@@ -37,6 +37,8 @@ def create_app(services: Services) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
+        # any local dev server port (vite may pick another one) plus the Tauri webview origins
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?$",
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -15,7 +15,7 @@ from typing import Any
 from ..config import Settings
 from ..db import Database
 from ..events import EventBus
-from ..state import AppState
+from ..state import AppState, SessionInfo
 from .embedded import EmbeddedSession, PendingPermission
 
 log = logging.getLogger(__name__)
@@ -113,12 +113,26 @@ class SessionManager:
 
     # --- state publishing -----------------------------------------------
     def publish(self) -> None:
+        summaries = self.summaries()
         active = self.active
-        self._state.update(
-            sessions=self.summaries(),
-            active_session_id=self.active_id,
-            session=active.info if active is not None else None,
-        )
+        info = active.info if active is not None else None
+        if info is None and self.active_id is not None:
+            # A stopped session can be selected; mirror it so the UI shows its history.
+            row = next((d for d in summaries if d["id"] == self.active_id), None)
+            if row is not None:
+                info = SessionInfo(
+                    id=row["id"],
+                    cwd=row["cwd"],
+                    mode="embedded",
+                    status="stopped",
+                    model=row["model"],
+                    started_at=row["started_at"],
+                    permission_mode=row["permission_mode"] or self._settings().claude.permission_mode,
+                    title=row["title"],
+                    sdk_session_id=row["sdk_session_id"],
+                    last_active=row["last_active"],
+                )
+        self._state.update(sessions=summaries, active_session_id=self.active_id, session=info)
 
     def _on_change(self, _session: EmbeddedSession) -> None:
         self.publish()
