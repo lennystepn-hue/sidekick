@@ -1,2 +1,5 @@
+packages:
+  - channels/*
+
 allowBuilds:
   esbuild: true
