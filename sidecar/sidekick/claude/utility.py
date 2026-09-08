@@ -32,7 +32,18 @@ def load_prompt(name: str, directory: Path | None = None) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def build_options(model: str, system: str, cli_path: str | None = None) -> Any:
+_cli_log = logging.getLogger("claude.cli")
+
+
+def cli_stderr(line: str) -> None:
+    """Receives claude.exe's stderr. Registering a callback also makes the SDK pipe stderr
+    instead of inheriting ours; in the packaged sidecar (spawned by Tauri) inheriting the
+    stderr handle fails with [WinError 50] and no claude.exe can start at all."""
+    if line.strip():
+        _cli_log.debug("%s", line.rstrip())
+
+
+def build_options(model: str, system: str, cli_path: str | None = None, thinking: bool = False) -> Any:
     from claude_agent_sdk import ClaudeAgentOptions
 
     return ClaudeAgentOptions(
@@ -42,11 +53,12 @@ def build_options(model: str, system: str, cli_path: str | None = None) -> Any:
         allowed_tools=[],
         setting_sources=[],
         strict_mcp_config=True,
-        thinking={"type": "disabled"},
+        thinking={"type": "adaptive"} if thinking else {"type": "disabled"},
         permission_mode="dontAsk",
         max_turns=1,
         cli_path=cli_path or None,
         env={"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+        stderr=cli_stderr,
     )
 
 
@@ -121,6 +133,30 @@ class UtilityLLM:
                     await self._drop(key)
             return await asyncio.wait_for(self._complete_oneshot(model, system, prompt), self._timeout_s)
 
+    async def generate(
+        self, model: str, system: str, prompt: str, timeout_s: float = 300, thinking: bool = True
+    ) -> str:
+        """A long one-shot call for document generation: no warm client, own timeout,
+        thinking allowed. Transient process-start failures are retried."""
+        from claude_agent_sdk import query
+
+        self.calls_made += 1
+        options = build_options(model, system, self._cli_path, thinking=thinking)
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                messages = [m async for m in _timed(query(prompt=prompt, options=options), timeout_s)]
+                return collect_text(messages)
+            except TimeoutError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                if attempt == 2 or "WinError" not in str(exc) and "start" not in str(exc).lower():
+                    raise
+                log.warning("generate start failed (attempt %d): %s; retrying", attempt + 1, exc)
+                await asyncio.sleep(0.7 * (attempt + 1))
+        raise RuntimeError(str(last))
+
     async def warm_up(self, targets: Iterable[tuple[str, str]]) -> None:
         for model, system in targets:
             key = client_key(model, system)
@@ -190,6 +226,22 @@ class UtilityLLM:
         return collect_text(messages)
 
 
+async def _timed(agen: Any, timeout_s: float) -> Any:
+    """Iterate an async generator with an overall deadline."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    it = agen.__aiter__()
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TimeoutError("claude call timed out")
+        try:
+            item = await asyncio.wait_for(it.__anext__(), remaining)
+        except StopAsyncIteration:
+            return
+        yield item
+
+
 class FakeLLM:
     """Scripted responses for tests; records every call."""
 
@@ -197,6 +249,9 @@ class FakeLLM:
         self.responses = list(responses or [])
         self.error = error
         self.calls: list[dict[str, str]] = []
+        # generate(): answer per file marker found in the prompt, else the scripted responses
+        self.documents: dict[str, str] = {}
+        self.generate_errors: dict[str, Exception] = {}
 
     async def complete(self, model: str, system: str, prompt: str) -> str:
         self.calls.append({"model": model, "system": system, "prompt": prompt})
@@ -205,3 +260,17 @@ class FakeLLM:
         if not self.responses:
             return ""
         return self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+
+    async def generate(
+        self, model: str, system: str, prompt: str, timeout_s: float = 300, thinking: bool = True
+    ) -> str:
+        self.calls.append({"model": model, "system": system, "prompt": prompt, "generate": "1"})
+        # keys match the "…: <file>\n" line of the prompt, not cross-references in the brief
+        for name, exc in self.generate_errors.items():
+            if f": {name}\n" in prompt:
+                self.generate_errors.pop(name)  # fail once, then succeed on retry
+                raise exc
+        for name, text in self.documents.items():
+            if f": {name}\n" in prompt:
+                return text
+        return await self.complete(model, system, prompt)

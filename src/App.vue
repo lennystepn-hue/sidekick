@@ -53,7 +53,7 @@ watch(
   },
 );
 
-/** "+" in the sessions panel and Ctrl+Shift+N: pick a directory, then create and activate a session. */
+/** "Session" in the sessions panel and Ctrl+Shift+N: pick a directory, then create and activate a session. */
 let creating = false;
 async function newSession(): Promise<void> {
   if (creating) return;
@@ -62,6 +62,16 @@ async function newSession(): Promise<void> {
     const initial = settings.settings?.claude.last_cwd || app.session?.cwd || undefined;
     const dir = await pickDirectory(initial);
     if (dir) await app.createSession(dir);
+  } finally {
+    creating = false;
+  }
+}
+/** "Brainstorm" in the sessions panel and Ctrl+Shift+B: no folder, the partner starts right away. */
+async function newBrainstorm(): Promise<void> {
+  if (creating) return;
+  creating = true;
+  try {
+    await app.createBrainstorm();
   } finally {
     creating = false;
   }
@@ -76,6 +86,11 @@ function onKey(e: KeyboardEvent): void {
   if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
     e.preventDefault();
     void newSession();
+    return;
+  }
+  if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === "b") {
+    e.preventDefault();
+    void newBrainstorm();
     return;
   }
   if (e.key === "Escape") {
@@ -130,7 +145,7 @@ onBeforeUnmount(() => {
       @toggle-sessions="sessionsOpen = !sessionsOpen"
     />
     <div class="body" :class="{ 'with-sessions': sessionsOpen, 'with-panel': panelOpen }">
-      <SessionsPanel v-if="sessionsOpen" @close="sessionsOpen = false" @new="newSession" />
+      <SessionsPanel v-if="sessionsOpen" @close="sessionsOpen = false" @new="newSession" @brainstorm="newBrainstorm" />
       <main class="main">
         <TranscriptView />
         <Transition name="rise">

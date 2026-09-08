@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY, cwd TEXT NOT NULL, mode TEXT NOT NULL,
   started_at TEXT NOT NULL, ended_at TEXT,
   title TEXT NOT NULL DEFAULT '', sdk_session_id TEXT, last_active TEXT,
-  model TEXT NOT NULL DEFAULT '', permission_mode TEXT NOT NULL DEFAULT '', title_auto INTEGER NOT NULL DEFAULT 1
+  model TEXT NOT NULL DEFAULT '', permission_mode TEXT NOT NULL DEFAULT '', title_auto INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL DEFAULT 'code', idea_state TEXT, project_path TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -43,6 +44,9 @@ SESSION_MIGRATIONS = {
     "model": "TEXT NOT NULL DEFAULT ''",
     "permission_mode": "TEXT NOT NULL DEFAULT ''",
     "title_auto": "INTEGER NOT NULL DEFAULT 1",
+    "kind": "TEXT NOT NULL DEFAULT 'code'",
+    "idea_state": "TEXT",
+    "project_path": "TEXT",
 }
 SESSION_UPDATABLE = {
     "title",
@@ -53,6 +57,9 @@ SESSION_UPDATABLE = {
     "title_auto",
     "ended_at",
     "cwd",
+    "kind",
+    "idea_state",
+    "project_path",
 }
 
 HOOK_EVENT_LIMIT = 500
@@ -101,6 +108,7 @@ class Database:
         permission_mode: str = "",
         sdk_session_id: str | None = None,
         title_auto: bool = True,
+        kind: str = "code",
     ) -> None:
         """Insert a session, or revive an existing one (resume) keeping its history."""
         now = now_iso()
@@ -108,16 +116,19 @@ class Database:
             self._conn.execute(
                 """
                 INSERT INTO sessions(id, cwd, mode, started_at, ended_at, title, sdk_session_id, last_active,
-                                     model, permission_mode, title_auto)
-                VALUES (?,?,?,?,NULL,?,?,?,?,?,?)
+                                     model, permission_mode, title_auto, kind)
+                VALUES (?,?,?,?,NULL,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                   cwd=excluded.cwd, ended_at=NULL, last_active=excluded.last_active,
                   model=excluded.model, permission_mode=excluded.permission_mode,
                   sdk_session_id=COALESCE(excluded.sdk_session_id, sessions.sdk_session_id),
                   title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
-                  title_auto=excluded.title_auto
+                  title_auto=excluded.title_auto, kind=excluded.kind
                 """,
-                (id, cwd, mode, now, title, sdk_session_id, now, model, permission_mode, int(title_auto)),
+                (
+                    id, cwd, mode, now, title, sdk_session_id, now, model, permission_mode,
+                    int(title_auto), kind,
+                ),
             )
             self._conn.commit()
 

@@ -41,6 +41,20 @@ def first_sentences(text: str, limit: int = 240) -> str:
     return cut.rstrip() + "…"
 
 
+def spoken_reply(text: str, limit: int = 900) -> str:
+    """A brainstorm reply read out as is: markdown removed, cut at a sentence end if very long."""
+    plain = strip_markdown(text).replace("\n", " ")
+    plain = re.sub(r"\s{2,}", " ", plain).strip()
+    if len(plain) <= limit:
+        return plain
+    cut = plain[:limit]
+    for sep in (". ", "! ", "? "):
+        idx = cut.rfind(sep)
+        if idx > limit // 2:
+            return cut[: idx + 1]
+    return cut.rstrip() + "…"
+
+
 def short_value(value: Any, limit: int = 120) -> str:
     if isinstance(value, str):
         s = value.strip().replace("\n", " ")

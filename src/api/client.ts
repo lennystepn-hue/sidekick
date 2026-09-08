@@ -6,6 +6,7 @@ import type {
   AppState,
   AudioDevice,
   BluetoothHealth,
+  BrainstormInfo,
   BtwExchange,
   ExternalSession,
   GestureLogEntry,
@@ -13,13 +14,16 @@ import type {
   HealthResponse,
   HooksStatus,
   HookScope,
+  MaterializeOptions,
   Message,
   OkMessage,
   PermissionRequest,
   PermissionResolution,
+  ProjectSuggestion,
   SecretName,
   SecretsStatus,
   Session,
+  SessionCreateOptions,
   SessionSummary,
   Settings,
   SettingsPatch,
@@ -158,8 +162,14 @@ export const api = {
 
   // sessions (multiple concurrent embedded sessions; `/session/*` above acts on the active one)
   sessions: () => request<SessionSummary[]>("GET", "/sessions"),
-  sessionCreate: (cwd: string, model?: string, title?: string) =>
-    request<SessionSummary>("POST", "/sessions", { cwd, ...(model ? { model } : {}), ...(title ? { title } : {}) }),
+  /** `cwd` is required for code sessions and optional for brainstorms. Empty strings are not sent. */
+  sessionCreate: (o: SessionCreateOptions) =>
+    request<SessionSummary>("POST", "/sessions", {
+      ...(o.kind ? { kind: o.kind } : {}),
+      ...(o.cwd ? { cwd: o.cwd } : {}),
+      ...(o.model ? { model: o.model } : {}),
+      ...(o.title ? { title: o.title } : {}),
+    }),
   sessionActivate: (id: string) => request<SessionSummary>("POST", `/sessions/${encodeURIComponent(id)}/activate`),
   sessionResume: (id: string) => request<SessionSummary>("POST", `/sessions/${encodeURIComponent(id)}/resume`),
   sessionStopById: (id: string) => request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/stop`),
@@ -171,6 +181,14 @@ export const api = {
   sessionSendTo: (id: string, text: string) =>
     request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/send`, { text }),
   sessionInterruptById: (id: string) => request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/interrupt`),
+
+  // brainstorm / projects
+  brainstormGet: (id: string) => request<BrainstormInfo>("GET", `/brainstorm/${encodeURIComponent(id)}`),
+  brainstormMaterialize: (id: string, opts: MaterializeOptions = {}) =>
+    request<{ ok: boolean; job_id: string }>("POST", `/brainstorm/${encodeURIComponent(id)}/materialize`, opts),
+  brainstormKickoff: (id: string) => request<SessionSummary>("POST", `/brainstorm/${encodeURIComponent(id)}/kickoff`),
+  projectsOpen: (path: string) => request<{ ok: boolean }>("POST", "/projects/open", { path }),
+  projectsSuggest: (title: string) => request<ProjectSuggestion>("GET", `/projects/suggest${q({ title })}`),
 
   // btw
   btw: (limit = 50) => request<BtwExchange[]>("GET", `/btw${q({ limit })}`),

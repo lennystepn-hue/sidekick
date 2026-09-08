@@ -50,6 +50,7 @@ class Services:
     bluetooth: Any = None
     bluetooth_doctor: Any = None
     sessions: Any = None
+    materializer: Any = None
     hooks: Any = None
     btw: Any = None
     listen: Any = None
@@ -294,8 +295,9 @@ def build_services(
     from .claude.btw import BtwAssistant
     from .claude.embedded import EmbeddedSession, PendingPermission
     from .claude.hooks import HookHandler
+    from .claude.materialize import Materializer
     from .claude.sessions import SessionManager
-    from .claude.summarize import Summarizer
+    from .claude.summarize import Summarizer, spoken_reply
     from .claude.transcript import recent_messages
     from .claude.utility import UtilityLLM
     from .gestures.controller import GestureController
@@ -459,9 +461,26 @@ def build_services(
         return f"{session.title}: " if len(sessions.running()) > 1 and session.title else ""
 
     async def on_done(text: str, session: EmbeddedSession) -> None:
+        if session.is_brainstorm:
+            # The partner speaks for itself: short replies, read verbatim, no tone in between.
+            if settings().brainstorm.speak_replies and text.strip():
+                speaker.speak(_prefix(session) + spoken_reply(text), kind="done")
+                if settings().brainstorm.auto_listen:
+                    spawn(auto_listen(), "auto-listen")
+            return
         sounds.play("done")
         summary = await summarizer.summarize(text)
         speaker.speak(_prefix(session) + summary, kind="done")
+
+    async def auto_listen() -> None:
+        """Open the microphone again once the spoken reply has finished (round trip without a tap)."""
+        await asyncio.sleep(0.5)
+        for _ in range(240):  # up to two minutes of speech
+            if not speaker.is_speaking and speaker.queue_empty:
+                break
+            await asyncio.sleep(0.5)
+        if state.glasses_connected and state.mode == "idle" and not services.listen.busy:
+            await services.listen.toggle("main")
 
     async def on_needs_input(pending: PendingPermission, session: EmbeddedSession) -> None:
         sounds.play("needs_input")
@@ -476,10 +495,19 @@ def build_services(
         speaker.speak(_prefix(session) + spoken, kind="needs_input")
 
     sessions = SessionManager(
-        settings, state, bus, db, on_done, on_needs_input, attention_refresh=hooks.refresh_state
+        settings,
+        state,
+        bus,
+        db,
+        on_done,
+        on_needs_input,
+        attention_refresh=hooks.refresh_state,
+        # tests keep brainstorm scratch folders next to their temporary database
+        scratch_dir=None if hardware else Path(str(db_path)).parent / "brainstorms",
     )
     services.sessions = sessions
     sessions.load()
+    services.materializer = Materializer(settings, bus, db, sessions, llm)
 
     # --- btw -----------------------------------------------------------------------------
     def btw_context() -> tuple[str | None, list[dict[str, str]], str | None]:

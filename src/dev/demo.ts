@@ -9,6 +9,8 @@ import type {
   BtwExchange,
   ExternalSession,
   GestureLogEntry,
+  IdeaState,
+  MaterializeJob,
   Message,
   PermissionRequest,
   SessionSummary,
@@ -26,6 +28,11 @@ const SESSION_ID = "sess_demo_01";
 const BLOG_ID = "sess_demo_02";
 const NOTES_ID = "sess_demo_03";
 const LAB_ID = "sess_demo_04";
+const IDEA_ID = "sess_demo_05";
+const MADE_ID = "sess_demo_06";
+const MADE_CODE_ID = "sess_demo_07";
+const PROJECTS_DIR = "C:\\Users\\ender\\Projects";
+const SCRATCH_DIR = "C:\\Users\\ender\\AppData\\Roaming\\Sidekick\\brainstorms";
 const iso = (secondsAgo: number): string => new Date(Date.now() - secondsAgo * 1000).toISOString();
 
 // ---------- sessions ----------
@@ -41,8 +48,51 @@ const mkSession = (
   message_count: 0,
   pending: 0,
   resumable: true,
+  kind: "code",
+  project_path: null,
+  idea: null,
   ...o,
 });
+
+// ---------- ideas ----------
+
+/** Mid-way: the core is clear, scope and tech are sketched, two questions still open. */
+const coffeeIdea: IdeaState = {
+  title: "Kaffeelog",
+  one_liner: "Ein Tagebuch für Espresso-Einstellungen, das aus jedem Bezug lernt.",
+  problem: "Jede neue Bohne heißt wieder raten: Mahlgrad, Dosis, Zeit. Die guten Einstellungen gehen zwischen zwei Tüten verloren.",
+  users: "Hobby-Baristas mit Siebträger, die zwei bis drei Bohnen parallel in Rotation haben.",
+  core_features: [
+    "Bezug erfassen: Bohne, Mahlgrad, Dosis, Zeit, Bewertung",
+    "Vorschlag für den nächsten Bezug aus den letzten Bewertungen",
+    "Bohnen-Archiv mit Röstdatum",
+    "Sprachnotiz per Brille direkt nach dem Bezug",
+  ],
+  non_goals: ["Kein Social-Feed", "Keine Waagen-Integration im MVP"],
+  stack: ["Tauri 2 + Vue", "SQLite lokal"],
+  decisions: ["Lokal zuerst, kein Konto", "Vorschläge regelbasiert statt ML im MVP"],
+  open_questions: ["Wie kommt die Sprachnotiz ohne Sidekick vom Handy rein?", "Export als CSV oder gar nicht?"],
+  next_steps: ["Datenmodell für einen Bezug festziehen", "Bewertungsskala entscheiden: Sterne oder Schieberegler"],
+  readiness: 72,
+  ready: false,
+  updated_at: iso(240),
+};
+/** Ready and already materialized. */
+const shelfIdea: IdeaState = {
+  title: "Regalwächter",
+  one_liner: "Ein kleiner Dienst, der Preisänderungen für gemerkte Produkte meldet.",
+  problem: "Preise schwanken täglich; wer auf ein Angebot wartet, prüft von Hand oder verpasst es.",
+  users: "Ich selbst, und Freunde, die ein paar Wunschlisten pflegen.",
+  core_features: ["Produkt per URL merken", "Preis täglich prüfen", "Benachrichtigung bei Unterschreitung", "Verlauf als kleine Kurve"],
+  non_goals: ["Keine Affiliate-Links", "Kein Scraping hinter Logins"],
+  stack: ["Python + FastAPI", "SQLite", "ntfy für Push"],
+  decisions: ["Ein Prozess, ein Cron, keine Queue", "Nur Shops mit stabiler Preisangabe im HTML"],
+  open_questions: [],
+  next_steps: ["Meilenstein 1: URL merken und einmal prüfen"],
+  readiness: 88,
+  ready: true,
+  updated_at: iso(7200),
+};
 
 /** Active + running (the existing demo transcript), waiting with open requests, idle, stopped+resumable. */
 const sessions: SessionSummary[] = [
@@ -50,6 +100,9 @@ const sessions: SessionSummary[] = [
   mkSession({ id: BLOG_ID, cwd: BLOG_CWD, title: "Blog-Relaunch", status: "waiting", model: "claude-sonnet-5", started_at: iso(5400), last_active: iso(130), message_count: 4 }),
   mkSession({ id: NOTES_ID, cwd: "C:\\Users\\ender\\Projekte\\notizen", title: "", status: "idle", started_at: iso(2600), last_active: iso(1500), message_count: 2 }),
   mkSession({ id: LAB_ID, cwd: "C:\\Users\\ender\\Projekte\\sidecar-lab", title: "Sidecar-Tests", status: "stopped", started_at: iso(100_000), last_active: iso(93_000), message_count: 3 }),
+  mkSession({ id: IDEA_ID, cwd: `${SCRATCH_DIR}\\${IDEA_ID}`, kind: "brainstorm", title: "Kaffeelog", status: "idle", model: "claude-opus-5", started_at: iso(2000), last_active: iso(240), message_count: 6, idea: coffeeIdea }),
+  mkSession({ id: MADE_ID, cwd: `${SCRATCH_DIR}\\${MADE_ID}`, kind: "brainstorm", title: "Regalwächter", status: "idle", model: "claude-opus-5", started_at: iso(12_000), last_active: iso(7200), message_count: 4, idea: shelfIdea, project_path: `${PROJECTS_DIR}\\regalwaechter` }),
+  mkSession({ id: MADE_CODE_ID, cwd: `${PROJECTS_DIR}\\regalwaechter`, title: "Regalwächter", status: "idle", started_at: iso(7100), last_active: iso(6900), message_count: 2 }),
 ];
 let activeId: string | null = SESSION_ID;
 
@@ -107,6 +160,8 @@ const settings: Settings = {
     cli_path: "",
     last_cwd: CWD,
   },
+  brainstorm: { model: "claude-opus-5", docs_model: "claude-opus-5", speak_replies: true, auto_listen: false },
+  projects: { base_dir: PROJECTS_DIR, git_init: true, start_session_after_create: true },
 };
 
 // ---------- messages ----------
@@ -203,12 +258,51 @@ const labMessages: Message[] = [
   msg(303, "tool", 93_000, [{ type: "tool_result", tool_use_id: "l1", content: "3 failed, 11 passed in 12.8s", is_error: true }], LAB_ID),
 ];
 
+const ideaMessages: Message[] = [
+  msg(501, "user", 1900, [{ type: "text", text: "Ich will was für meinen Siebträger bauen. Ich vergesse ständig, welche Einstellung bei welcher Bohne gut war." }], IDEA_ID),
+  msg(502, "assistant", 1880, [{ type: "text", text: "Klingt nach einem Logbuch, das mitdenkt. Bevor wir über Features reden: Was wäre der Moment, in dem du es wirklich benutzt – direkt am Bezug mit nassen Händen, oder abends in Ruhe?" }], IDEA_ID),
+  msg(503, "user", 1700, [{ type: "text", text: "Direkt am Bezug. Am liebsten per Sprache über die Brille, sonst tippe ich es nie ein." }], IDEA_ID),
+  msg(504, "assistant", 1680, [{ type: "text", text: "Dann ist die Sprachnotiz der Kern, nicht die Tabelle. Ich würde als MVP vorschlagen: ein Bezug pro Notiz, eine Bewertung, und einen Vorschlag für den nächsten Bezug aus den letzten drei. Kein Konto, alles lokal. Passt das, oder brauchst du es auch auf dem Handy?" }], IDEA_ID),
+  msg(505, "user", 300, [{ type: "text", text: "Lokal reicht erstmal. Vorschläge gerne, aber ohne Machine-Learning-Zirkus." }], IDEA_ID),
+  msg(506, "assistant", 240, [{ type: "text", text: "Notiert: regelbasiert, lokal, kein Konto. Zwei Dinge sind noch offen: Wie kommt eine Notiz rein, wenn Sidekick nicht läuft, und willst du überhaupt exportieren? Meine Empfehlung: beides erst nach Meilenstein 1. Einverstanden?" }], IDEA_ID),
+];
+
+const madeMessages: Message[] = [
+  msg(601, "user", 11_800, [{ type: "text", text: "Ich will einen kleinen Dienst, der mir sagt, wenn ein gemerktes Produkt billiger wird." }], MADE_ID),
+  msg(602, "assistant", 11_700, [{ type: "text", text: "Ein Preiswächter. Wer außer dir soll ihn nutzen, und wie soll die Meldung ankommen – Push, Mail, oder reicht eine Liste?" }], MADE_ID),
+  msg(603, "user", 7400, [{ type: "text", text: "Push per ntfy. Nur ich und ein paar Freunde, keine Affiliate-Geschichten." }], MADE_ID),
+  msg(604, "assistant", 7200, [{ type: "text", text: "Dann ist es rund: URL merken, täglich prüfen, ntfy bei Unterschreitung, ein Verlauf. Ein Prozess, ein Cron, keine Queue. Ich habe genug, soll ich das Projekt anlegen?" }], MADE_ID),
+];
+
+const madeCodeMessages: Message[] = [
+  msg(701, "user", 7100, [{ type: "text", text: "Du arbeitest im neuen Projekt Regalwächter. Lies zuerst CLAUDE.md, docs/SPEC.md und docs/PLAN.md und setze Meilenstein 1 um." }], MADE_CODE_ID),
+  msg(702, "assistant", 6900, [{ type: "text", text: "Gelesen. Meilenstein 1 ist „URL merken und einmal prüfen“. Ich lege das FastAPI-Grundgerüst mit SQLite an und fange mit dem Datenmodell an." }], MADE_CODE_ID),
+];
+
 const messagesBy: Record<string, Message[]> = {
   [SESSION_ID]: messages,
   [BLOG_ID]: blogMessages,
   [NOTES_ID]: notesMessages,
   [LAB_ID]: labMessages,
+  [IDEA_ID]: ideaMessages,
+  [MADE_ID]: madeMessages,
+  [MADE_CODE_ID]: madeCodeMessages,
 };
+
+/** Latest materialize job per brainstorm, like the sidecar's `GET /brainstorm/{id}`. */
+const jobs: Record<string, MaterializeJob> = {};
+
+const slugify = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/ä/g, "ae")
+    .replace(/ö/g, "oe")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "projekt";
+/** Folders that "exist" in the demo: every materialized project so far. */
+const existingSlugs = new Set(["regalwaechter"]);
 
 const streamingText =
   "Alles klar. Ich starte den kompletten Testlauf und melde mich, sobald das Blog-Projekt dran ist. Für die Hooks dort brauche ich noch den Scope";
@@ -384,7 +478,10 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     touch(s);
     pushState();
     const streamId = `msg_${Date.now().toString(36)}`;
-    const reply = `Verstanden: „${text}“. Ich kümmere mich darum und melde mich, sobald etwas von dir gebraucht wird.`;
+    const brainstorm = s.kind === "brainstorm";
+    const reply = brainstorm
+      ? `Gut, das halte ich fest: „${text}“. Damit wird die Idee runder. Nächste Frage: Was wäre der kleinste Stand, mit dem du es eine Woche lang wirklich benutzen würdest?`
+      : `Verstanden: „${text}“. Ich kümmere mich darum und melde mich, sobald etwas von dir gebraucht wird.`;
     void (async () => {
       await sleep(400);
       for (let i = 0; i < reply.length; i += 9) {
@@ -396,17 +493,78 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
       s.message_count++;
       if (s.status === "running") s.status = "idle";
       touch(s);
+      // The partner's state block: one more decision, a bit more readiness (80 flips "ready").
+      if (brainstorm) {
+        const prev = s.idea ?? { ...coffeeIdea, title: s.title || "Neue Idee", one_liner: "", problem: "", users: "", core_features: [], non_goals: [], stack: [], decisions: [], open_questions: [], next_steps: [], readiness: 0, ready: false };
+        const readiness = Math.min(100, prev.readiness + 8);
+        s.idea = { ...prev, decisions: [...prev.decisions, text], readiness, ready: readiness >= 80, updated_at: new Date().toISOString() };
+        emit("idea_state", { session_id: s.id, state: clone(s.idea) });
+      }
       pushState();
     })();
   }
-  function createSession(cwd: string, model: unknown, title: unknown): SessionSummary {
+  /** The kickoff prompt of a fresh code session; emitted live because the store may have fetched the (empty) history already. */
+  function kickoffMessage(code: SessionSummary, project_path: string): void {
+    const m = msg(nextId++, "user", 0, [{ type: "text", text: `Du arbeitest im neuen Projekt ${basename(project_path)} in ${project_path}. Lies zuerst CLAUDE.md, docs/SPEC.md und docs/PLAN.md und setze Meilenstein 1 um.` }], code.id);
+    messagesBy[code.id] = [m];
+    code.message_count = 1;
+    emit("message", m);
+  }
+  /** Materialization as the sidecar would run it: one progress event per step over ~3 s, then done. */
+  function materialize(s: SessionSummary, b: Record<string, unknown>): { ok: true; job_id: string } {
+    const job_id = `job_${Date.now().toString(36)}`;
+    let slug = slugify(typeof b.name === "string" && b.name.trim() ? b.name : s.idea?.title || s.title || "projekt");
+    if (existingSlugs.has(slug)) {
+      let n = 2;
+      while (existingSlugs.has(`${slug}-${n}`)) n++;
+      slug = `${slug}-${n}`;
+    }
+    const project_path = `${String(b.base_dir || PROJECTS_DIR)}\\${slug}`;
+    const gitInit = b.git_init !== false;
+    const startSession = b.start_session !== false;
+    const labels = [
+      `Ordner anlegen: ${slug}`,
+      "README.md und CLAUDE.md schreiben",
+      "docs/SPEC.md und docs/PLAN.md schreiben",
+      "DECISIONS, OPEN_QUESTIONS, KICKOFF, BRAINSTORM",
+      ...(gitInit ? ["Git initialisieren und ersten Commit setzen"] : []),
+      ...(startSession ? ["Code-Session mit Kickoff starten"] : []),
+    ];
+    const total = labels.length;
+    const progress = (patch: Partial<MaterializeJob> & Pick<MaterializeJob, "step" | "label" | "status">): void => {
+      jobs[s.id] = { job_id, total, ...patch };
+      emit("materialize_progress", { session_id: s.id, ...jobs[s.id] });
+    };
+    void (async () => {
+      for (let i = 0; i < total; i++) {
+        await sleep(i === 0 ? 150 : 420 + (i % 2) * 160);
+        progress({ step: i + 1, label: labels[i]!, status: "running" });
+      }
+      await sleep(400);
+      existingSlugs.add(slug);
+      s.project_path = project_path;
+      let code_session_id: string | undefined;
+      if (startSession) {
+        const code = createSession(project_path, undefined, slug);
+        code_session_id = code.id;
+        kickoffMessage(code, project_path);
+      }
+      progress({ step: total, label: labels[total - 1]!, status: "done", project_path, code_session_id });
+      pushState();
+    })();
+    return { ok: true, job_id };
+  }
+  function createSession(cwd: string, model: unknown, title: unknown, kind: SessionSummary["kind"] = "code"): SessionSummary {
     const now = new Date().toISOString();
+    const id = `sess_${Date.now().toString(36)}`;
+    const brainstorm = kind === "brainstorm";
     const s = mkSession({
-      id: `sess_${Date.now().toString(36)}`,
-      cwd,
-      title: typeof title === "string" && title.trim() ? title.trim() : basename(cwd),
+      id,
+      cwd: brainstorm ? `${SCRATCH_DIR}\\${id}` : cwd,
+      kind,
+      title: typeof title === "string" && title.trim() ? title.trim() : brainstorm ? "" : basename(cwd),
       status: "idle",
-      model: typeof model === "string" ? model : "",
+      model: typeof model === "string" ? model : brainstorm ? settings.brainstorm.model : "",
       started_at: now,
       last_active: now,
       sdk_session_id: null,
@@ -467,6 +625,18 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
           return Promise.resolve({ ok: false, adapter_name: state.bluetooth_adapter.name, problem_code: 10, problem_description: "STATUS_DEVICE_POWER_FAILURE", instance_id: "USB\\VID_8087&PID_0029" });
         case "/hooks/status":
           return Promise.resolve({ installed: true, file: `${CWD}\\.claude\\settings.json`, events: ["Stop", "Notification", "PermissionRequest", "UserPromptSubmit", "SessionStart", "SessionEnd"] });
+        case "/projects/suggest": {
+          const title = new URLSearchParams(fullPath.split("?")[1] ?? "").get("title") ?? "";
+          const slug = slugify(title);
+          return Promise.resolve({ slug, path: `${PROJECTS_DIR}\\${slug}`, exists: existingSlugs.has(slug) });
+        }
+      }
+      const bg = path.match(/^\/brainstorm\/([^/]+)$/);
+      if (bg) {
+        const s = find(decodeURIComponent(bg[1]!));
+        if (!s) return Promise.reject(new ApiError("Session nicht gefunden", 404, path));
+        const files = s.project_path ? ["README.md", "CLAUDE.md", "docs/SPEC.md", "docs/PLAN.md", "docs/DECISIONS.md", "docs/OPEN_QUESTIONS.md", "docs/KICKOFF.md", "docs/BRAINSTORM.md"] : [];
+        return sleep(60).then(() => ({ state: clone(s.idea), project_path: s.project_path, materialized: !!s.project_path, files, job: jobs[s.id] ? clone(jobs[s.id]) : null }));
       }
       return Promise.resolve([]);
     }
@@ -476,8 +646,27 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     }
     if (path.startsWith("/secrets/")) return Promise.resolve({ ok: true });
 
+    // ----- brainstorm / projects -----
+    const bm = path.match(/^\/brainstorm\/([^/]+)\/(materialize|kickoff)$/);
+    if (method === "POST" && bm) {
+      const s = find(decodeURIComponent(bm[1]!));
+      if (!s) return Promise.reject(new ApiError("Session nicht gefunden", 404, path));
+      if (bm[2] === "materialize") {
+        if (jobs[s.id]?.status === "running") return Promise.reject(new ApiError("Läuft bereits", 409, path));
+        return sleep(200).then(() => materialize(s, b));
+      }
+      if (!s.project_path) return Promise.reject(new ApiError("Noch kein Projekt angelegt", 409, path));
+      const code = createSession(s.project_path, undefined, basename(s.project_path));
+      kickoffMessage(code, s.project_path);
+      return sleep(300).then(() => clone(code));
+    }
+    if (method === "POST" && path === "/projects/open") return sleep(120).then(() => ({ ok: true }));
+
     // ----- multi-session routes -----
-    if (method === "POST" && path === "/sessions") return sleep(120).then(() => createSession(String(b.cwd), b.model, b.title));
+    if (method === "POST" && path === "/sessions") {
+      const kind = b.kind === "brainstorm" ? "brainstorm" : "code";
+      return sleep(120).then(() => createSession(String(b.cwd ?? ""), b.model, b.title, kind));
+    }
     if (perSession && path !== "/sessions/external") {
       const id = decodeURIComponent(perSession[1]!);
       const action = perSession[2];

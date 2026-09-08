@@ -8,15 +8,18 @@ summaries and `AppState.session` mirrors the active session.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from ..config import Settings
-from ..db import Database
+from ..db import Database, new_id
 from ..events import EventBus
 from ..state import AppState, SessionInfo
 from .embedded import EmbeddedSession, PendingPermission
+from .idea import IdeaState
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +38,7 @@ class SessionManager:
         on_needs_input: NeedsInputHook | None = None,
         attention_refresh: Callable[[], None] | None = None,
         client_factory: Callable[[Any], Any] | None = None,
+        scratch_dir: Path | None = None,
     ) -> None:
         self._settings = settings
         self._state = state
@@ -44,9 +48,21 @@ class SessionManager:
         self._on_needs_input = on_needs_input
         self._attention_refresh = attention_refresh
         self._client_factory = client_factory
+        self._scratch_dir = scratch_dir
         self.live: dict[str, EmbeddedSession] = {}
         self.active_id: str | None = None
         self._lock = asyncio.Lock()
+
+    def brainstorm_cwd(self, session_id: str) -> str:
+        """Scratch working directory for a brainstorm session (created on demand)."""
+        base = self._scratch_dir
+        if base is None:
+            from ..paths import brainstorms_dir
+
+            base = brainstorms_dir()
+        path = Path(base) / session_id
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
 
     # --- queries --------------------------------------------------------
     @property
@@ -82,6 +98,7 @@ class SessionManager:
         order: dict[str, int] = {}  # DB order (newest rowid first) breaks last_active ties
         for index, row in enumerate(self._db.list_sessions(200)):
             order[row["id"]] = index
+            idea = _idea_from_row(row)
             out[row["id"]] = {
                 "id": row["id"],
                 "cwd": row["cwd"],
@@ -96,6 +113,9 @@ class SessionManager:
                 "message_count": self._db.count_messages(row["id"]),
                 "pending": 0,
                 "resumable": bool(row.get("sdk_session_id")),
+                "kind": row.get("kind") or "code",
+                "project_path": row.get("project_path"),
+                "idea": idea.to_dict() if idea is not None else None,
             }
         for s in self.live.values():
             summary = s.summary()
@@ -131,6 +151,8 @@ class SessionManager:
                     title=row["title"],
                     sdk_session_id=row["sdk_session_id"],
                     last_active=row["last_active"],
+                    kind=row["kind"],
+                    project_path=row["project_path"],
                 )
         self._state.update(sessions=summaries, active_session_id=self.active_id, session=info)
 
@@ -175,10 +197,22 @@ class SessionManager:
         holder["s"] = session
         return session
 
-    async def create(self, cwd: str, model: str | None = None, title: str | None = None) -> EmbeddedSession:
+    async def create(
+        self,
+        cwd: str | None,
+        model: str | None = None,
+        title: str | None = None,
+        kind: str = "code",
+    ) -> EmbeddedSession:
         async with self._lock:
-            session = self._new(None)
-            await session.start(cwd, model, title=title)
+            session_id: str | None = None
+            if kind == "brainstorm":
+                session_id = new_id()
+                cwd = cwd or self.brainstorm_cwd(session_id)
+            if not cwd:
+                raise ValueError("cwd required")
+            session = self._new(session_id)
+            await session.start(cwd, model, title=title, kind=kind)
             self.live[session.session_id] = session  # type: ignore[index]
             self.active_id = session.session_id
             self.publish()
@@ -200,14 +234,39 @@ class SessionManager:
             if live is not None:
                 await live.stop()
             session = self._new(session_id)
-            session.title_auto = bool(row.get("title_auto", 1))
+            kind = row.get("kind") or "code"
+            cwd = row["cwd"]
+            if kind == "brainstorm" and not Path(cwd).is_dir():  # noqa: ASYNC240 - one stat
+                cwd = self.brainstorm_cwd(session_id)
             await session.start(
-                row["cwd"], row.get("model") or None, resume=sdk_id, title=row.get("title") or None
+                cwd,
+                row.get("model") or None,
+                resume=sdk_id,
+                title=row.get("title") or None,
+                kind=kind,
+                project_path=row.get("project_path"),
+                idea=_idea_from_row(row),
             )
+            session.title_auto = bool(row.get("title_auto", 1))
             self.live[session_id] = session
             self.active_id = session_id
             self.publish()
             return session
+
+    def set_project_path(self, session_id: str, path: str | None) -> None:
+        live = self.live.get(session_id)
+        if live is not None:
+            live.set_project_path(path)
+        else:
+            self._db.update_session(session_id, project_path=path)
+        self.publish()
+
+    def idea(self, session_id: str) -> IdeaState | None:
+        live = self.live.get(session_id)
+        if live is not None and live.idea is not None:
+            return live.idea
+        row = self._db.get_session(session_id)
+        return _idea_from_row(row) if row else None
 
     async def activate(self, session_id: str) -> dict[str, Any]:
         live = self.live.get(session_id)
@@ -267,3 +326,14 @@ class SessionManager:
     def on_settings_changed(self, old: Settings, new: Settings) -> None:
         for session in self.live.values():
             session.on_settings_changed(old, new)
+
+
+def _idea_from_row(row: dict[str, Any]) -> IdeaState | None:
+    raw = row.get("idea_state")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return IdeaState.from_dict(data) if isinstance(data, dict) else None

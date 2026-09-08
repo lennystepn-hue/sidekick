@@ -6,16 +6,24 @@ import { useAppStore } from "../stores/app";
 import { basename, shortPath } from "../utils/format";
 import Aura from "./Aura.vue";
 import MessageItem from "./MessageItem.vue";
+import ProjectCard from "./ProjectCard.vue";
 
 const app = useAppStore();
 const aura = useAuraState();
 /** Header line: title and directory of the active session (per-session store, see stores/app.ts). */
 const active = computed(() => app.activeSummary ?? app.session);
+const brainstorm = computed(() => app.activeIsBrainstorm);
 const title = computed(() => {
   const s = active.value;
   if (!s) return "";
   const t = (s as { title?: string }).title?.trim();
-  return t || basename(s.cwd);
+  return t || (brainstorm.value ? "Brainstorm" : basename(s.cwd));
+});
+/** Brainstorms: the project folder once it exists (from the job or the summary); the scratch cwd is never shown. */
+const projectPath = computed(() => {
+  if (!brainstorm.value) return null;
+  const job = app.activeJob;
+  return (job?.status === "done" ? job.project_path : null) ?? active.value?.project_path ?? null;
 });
 const scroller = ref<HTMLElement | null>(null);
 const list = ref<HTMLElement | null>(null);
@@ -50,6 +58,15 @@ const isEmpty = computed(() => visible.value.length === 0 && streamingItems.valu
 
 /** Empty-state copy follows the Aura: the screen says what the glasses would do next. */
 const emptyCopy = computed(() => {
+  if (brainstorm.value) {
+    return {
+      head: "Erzähl mir deine Idee. Ich frage nach, bis sie steht.",
+      sub:
+        aura.value.state === "off"
+          ? "Unten schreiben, oder die Brille verbinden und einmal tippen. Rechts wächst der Stand der Idee mit."
+          : "Einmal auf die Brille tippen und sprechen, oder unten schreiben. Rechts wächst der Stand der Idee mit.",
+    };
+  }
   switch (aura.value.state) {
     case "off":
       return { head: "Die Brille ist gerade nicht dran.", sub: "Verbinden, dann einmal tippen und sprechen." };
@@ -110,7 +127,11 @@ onBeforeUnmount(() => observer?.disconnect());
   <div class="wrap">
     <div v-if="active" class="session-line">
       <h1 class="session-title display ellipsis" :title="title">{{ title }}</h1>
-      <span class="mono muted session-cwd ellipsis" :title="active.cwd">{{ shortPath(active.cwd, 64) }}</span>
+      <template v-if="brainstorm">
+        <span class="session-kind idea">Brainstorm</span>
+        <span v-if="projectPath" class="mono muted session-cwd ellipsis" :title="projectPath">→ {{ shortPath(projectPath, 56) }}</span>
+      </template>
+      <span v-else class="mono muted session-cwd ellipsis" :title="active.cwd">{{ shortPath(active.cwd, 64) }}</span>
     </div>
     <div ref="scroller" class="scroller" @scroll.passive="onScroll">
       <div v-if="isEmpty" class="empty">
@@ -124,6 +145,10 @@ onBeforeUnmount(() => observer?.disconnect());
           <MessageItem v-for="m in streamingItems" :key="'stream:' + m.id" :message="m" :results="results" streaming />
         </TransitionGroup>
       </div>
+      <!-- Materialized brainstorm: one system card at the end, driven by the job / project path (no message type). -->
+      <Transition name="rise">
+        <ProjectCard v-if="projectPath && active" class="project" :session-id="active.id" :path="projectPath" :code-session-id="app.activeJob?.code_session_id" />
+      </Transition>
     </div>
     <Transition name="rise">
       <button v-if="!atBottom && !isEmpty" class="btn btn-sm jump" @click="scrollToBottom(true)">Zum Ende ↓</button>
@@ -162,6 +187,19 @@ onBeforeUnmount(() => observer?.disconnect());
   flex: 1 1 0;
   font-size: var(--fs-xs);
   min-width: 0;
+}
+.session-kind {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.session-kind.idea {
+  color: var(--idea);
+}
+.project {
+  max-width: 860px;
+  margin: 18px auto 0;
 }
 .scroller {
   flex: 1;

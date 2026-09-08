@@ -3,10 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useSettingsStore } from "../stores/settings";
 import { isTauri } from "../tauri";
 import AudioSection from "./settings/AudioSection.vue";
+import BrainstormSection from "./settings/BrainstormSection.vue";
 import ClaudeSection from "./settings/ClaudeSection.vue";
 import GesturesSection from "./settings/GesturesSection.vue";
 import HooksSection from "./settings/HooksSection.vue";
 import PresenceSection from "./settings/PresenceSection.vue";
+import ProjectsSection from "./settings/ProjectsSection.vue";
 import SoundsSection from "./settings/SoundsSection.vue";
 import SttSection from "./settings/SttSection.vue";
 import SystemSection from "./settings/SystemSection.vue";
@@ -30,6 +32,8 @@ const sections = computed<Section[]>(() =>
     { id: "sounds", label: "Töne", lead: "Kurze Signale für fertig, Fehler und Co." },
     { id: "system", label: "System", lead: isTauri() ? "Erscheinungsbild, Autostart und der Sidecar." : "Erscheinungsbild und der Sidecar." },
     { id: "claude", label: "Claude", lead: "Modelle, Freigaben und die Zustellung ohne Session." },
+    { id: "brainstorm", label: "Brainstorm", lead: "Der Partner, der mit dir eine Idee durchdenkt." },
+    { id: "projects", label: "Projekte", lead: "Wo aus einem Brainstorm ein Projektordner wird." },
     { id: "hooks", label: "Hooks", lead: "Claude Code im Terminal an Sidekick anschließen." },
   ] as Section[],
 );
@@ -111,6 +115,8 @@ onBeforeUnmount(() => opener?.focus());
           <SoundsSection v-else-if="s.id === 'sounds'" />
           <SystemSection v-else-if="s.id === 'system'" />
           <ClaudeSection v-else-if="s.id === 'claude'" :settings="st.settings" />
+          <BrainstormSection v-else-if="s.id === 'brainstorm'" :settings="st.settings" />
+          <ProjectsSection v-else-if="s.id === 'projects'" :settings="st.settings" />
           <HooksSection v-else-if="s.id === 'hooks'" :settings="st.settings" />
         </section>
         <div class="tail"></div>

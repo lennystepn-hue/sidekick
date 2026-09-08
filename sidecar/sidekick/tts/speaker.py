@@ -85,6 +85,10 @@ class Speaker:
     def is_speaking(self) -> bool:
         return self._current is not None and not self._current.done()
 
+    @property
+    def queue_empty(self) -> bool:
+        return self._queue.empty()
+
     # --- internals -----------------------------------------------------
     async def _worker(self) -> None:
         while True:

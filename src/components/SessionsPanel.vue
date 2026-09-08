@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useAppStore } from "../stores/app";
 import SessionItem from "./SessionItem.vue";
 
-const emit = defineEmits<{ (e: "close"): void; (e: "new"): void }>();
+const emit = defineEmits<{ (e: "close"): void; (e: "new"): void; (e: "brainstorm"): void }>();
 const app = useAppStore();
 
 /** Shared clock for the relative timestamps; one interval for the whole list. */
@@ -29,20 +29,26 @@ const openRequests = computed(() =>
       <span v-if="sessions.length" class="count muted">{{ sessions.length }}</span>
       <span v-if="openRequests" class="badge" :title="`${openRequests} offene Anfragen`">{{ openRequests }}</span>
       <span class="spacer"></span>
-      <button
-        class="btn btn-sm btn-icon btn-ghost"
-        title="Neue Session (Strg+Umschalt+N)"
-        aria-label="Neue Session"
-        @click="emit('new')"
-      >
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-          <path d="M8 3v10M3 8h10" />
-        </svg>
-      </button>
       <button class="btn btn-sm btn-icon btn-ghost" title="Sessions ausblenden" aria-label="Sessions ausblenden" @click="emit('close')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
           <path d="M4 4l8 8M12 4l-8 8" />
         </svg>
+      </button>
+    </div>
+
+    <!-- Two ways in: a code session in a folder, or a brainstorm without one. -->
+    <div class="new" role="group" aria-label="Neu anlegen">
+      <button class="seg" title="Neue Session in einem Projektordner (Strg+Umschalt+N)" @click="emit('new')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+        Session
+      </button>
+      <button class="seg idea" title="Neues Brainstorm, ohne Ordner (Strg+Umschalt+B)" @click="emit('brainstorm')">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1.5c.5 2.9 1.9 4.4 4.9 5-3 .6-4.4 2.1-4.9 5-.5-2.9-1.9-4.4-4.9-5 3-.6 4.4-2.1 4.9-5z" />
+        </svg>
+        Brainstorm
       </button>
     </div>
 
@@ -58,7 +64,7 @@ const openRequests = computed(() =>
     </ul>
     <div v-else class="empty">
       <p class="headline display">Noch keine Session.</p>
-      <p class="muted">Mit „+“ oder Strg+Umschalt+N einen Projektordner wählen.</p>
+      <p class="muted">„Session“ öffnet einen Projektordner, „Brainstorm“ legt direkt los.</p>
     </div>
   </aside>
 </template>
@@ -89,6 +95,56 @@ const openRequests = computed(() =>
 .count {
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+}
+.new {
+  display: flex;
+  flex-shrink: 0;
+  margin: 8px 8px 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-ctl);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.seg {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.seg + .seg {
+  border-left: 1px solid var(--border-strong);
+}
+.seg:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+.seg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.seg svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.seg.idea svg {
+  color: var(--idea);
+}
+.seg.idea:hover {
+  background: var(--idea-dim);
 }
 .list {
   flex: 1;

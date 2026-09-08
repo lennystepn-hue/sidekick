@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,9 +16,10 @@ router = APIRouter()
 
 
 class CreateBody(BaseModel):
-    cwd: str
+    cwd: str | None = None
     model: str | None = None
     title: str | None = None
+    kind: Literal["code", "brainstorm"] = "code"
 
 
 class RenameBody(BaseModel):
@@ -49,6 +50,18 @@ async def list_sessions(services: Services = Depends(get_services)) -> list[dict
 
 @router.post("/sessions")
 async def create_session(body: CreateBody, services: Services = Depends(get_services)) -> dict[str, Any]:
+    if body.kind == "brainstorm":
+        try:
+            session = await _manager(services).create(
+                None, body.model or None, body.title or None, kind="brainstorm"
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500, detail=f"Brainstorm konnte nicht gestartet werden: {exc}"
+            ) from exc
+        return session.summary()
+    if not body.cwd:
+        raise HTTPException(status_code=422, detail="cwd fehlt")
     cwd = Path(body.cwd).expanduser()
     if not cwd.is_dir():
         raise HTTPException(status_code=422, detail=f"Kein Verzeichnis: {cwd}")

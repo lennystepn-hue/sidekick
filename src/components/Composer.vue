@@ -26,6 +26,7 @@ watch(
 );
 
 const session = computed(() => app.session);
+const brainstorm = computed(() => app.activeIsBrainstorm);
 const status = computed(() => app.activeSummary?.status ?? session.value?.status ?? null);
 const running = computed(() => status.value === "running");
 /** Session is present and not stopped: the normal chat state. */
@@ -113,7 +114,13 @@ function onKey(e: KeyboardEvent): void {
     <div class="session">
       <template v-if="session && (live || resumable)">
         <span class="dot" :class="statusDot"></span>
-        <span class="mono cwd ellipsis" :title="session.cwd">{{ shortPath(session.cwd, 60) }}</span>
+        <span v-if="brainstorm" class="kind idea" title="Brainstorm: Ideen-Partner ohne Werkzeuge">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 1.5c.5 2.9 1.9 4.4 4.9 5-3 .6-4.4 2.1-4.9 5-.5-2.9-1.9-4.4-4.9-5 3-.6 4.4-2.1 4.9-5z" />
+          </svg>
+          Brainstorm
+        </span>
+        <span v-else class="mono cwd ellipsis" :title="session.cwd">{{ shortPath(session.cwd, 60) }}</span>
         <span class="chip" :class="statusChip">{{ status ? SESSION_STATUS_LABEL[status] : "" }}</span>
         <span v-if="session.model" class="muted model ellipsis" :title="session.model">{{ session.model }}</span>
         <span class="spacer"></span>
@@ -152,7 +159,9 @@ function onKey(e: KeyboardEvent): void {
         :placeholder="
           resumable
             ? 'Session ist beendet – fortsetzen, um weiterzuschreiben (Enter)'
-            : 'Nachricht an Claude … (Enter sendet, Shift+Enter neue Zeile)'
+            : brainstorm
+              ? 'Erzähl mir deine Idee …'
+              : 'Nachricht an Claude … (Enter sendet, Shift+Enter neue Zeile)'
         "
         :disabled="sending || resuming"
         @input="autosize"
@@ -207,6 +216,19 @@ function onKey(e: KeyboardEvent): void {
 .cwd {
   color: var(--muted);
   min-width: 0;
+}
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 500;
+}
+.kind.idea {
+  color: var(--idea);
+}
+.kind svg {
+  width: 13px;
+  height: 13px;
 }
 .model {
   font-size: var(--fs-xs);

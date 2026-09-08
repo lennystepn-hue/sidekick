@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useAppStore } from "../stores/app";
 import BtwList from "./BtwList.vue";
+import IdeaBoard from "./IdeaBoard.vue";
 import TranscriptList from "./TranscriptList.vue";
 
 const emit = defineEmits<{ (e: "close"): void }>();
 const app = useAppStore();
 
-type Tab = "transcripts" | "btw";
-const tab = ref<Tab>(readTab());
-function readTab(): Tab {
+type Tab = "transcripts" | "btw" | "idea";
+const brainstorm = computed(() => app.activeIsBrainstorm);
+const tab = ref<Tab>(brainstorm.value ? "idea" : readTab());
+/** The remembered tab is one of the two permanent ones; "Idee" follows the active session instead. */
+function readTab(): Exclude<Tab, "idea"> {
   try {
     return localStorage.getItem("sidekick.panelTab") === "btw" ? "btw" : "transcripts";
   } catch {
@@ -18,18 +21,43 @@ function readTab(): Tab {
 }
 function select(t: Tab): void {
   tab.value = t;
+  if (t === "idea") return;
   try {
     localStorage.setItem("sidekick.panelTab", t);
   } catch {
     /* ignore */
   }
 }
+// Switching to a brainstorm opens its board; leaving one falls back to the remembered tab.
+watch(
+  () => app.activeSessionId,
+  () => {
+    if (brainstorm.value) tab.value = "idea";
+    else if (tab.value === "idea") tab.value = readTab();
+  },
+);
+watch(brainstorm, (v) => {
+  if (!v && tab.value === "idea") tab.value = readTab();
+});
 const reviewing = computed(() => app.reviewing.length);
 </script>
 
 <template>
   <aside class="panel" aria-label="Seitenpanel">
     <div class="tabs" role="tablist">
+      <button
+        v-if="brainstorm"
+        class="tab display idea"
+        role="tab"
+        :aria-selected="tab === 'idea'"
+        :class="{ on: tab === 'idea' }"
+        @click="select('idea')"
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M8 1.5c.5 2.9 1.9 4.4 4.9 5-3 .6-4.4 2.1-4.9 5-.5-2.9-1.9-4.4-4.9-5 3-.6 4.4-2.1 4.9-5z" />
+        </svg>
+        Idee
+      </button>
       <button
         class="tab display"
         role="tab"
@@ -51,7 +79,8 @@ const reviewing = computed(() => app.reviewing.length);
       </button>
     </div>
     <div class="content">
-      <TranscriptList v-if="tab === 'transcripts'" />
+      <IdeaBoard v-if="tab === 'idea' && brainstorm" />
+      <TranscriptList v-else-if="tab === 'transcripts'" />
       <BtwList v-else />
     </div>
   </aside>
@@ -105,6 +134,14 @@ const reviewing = computed(() => app.reviewing.length);
 }
 .tab:hover {
   color: var(--text);
+}
+.tab svg {
+  width: 12px;
+  height: 12px;
+  color: var(--idea);
+}
+.tab.idea::after {
+  background: var(--idea);
 }
 .tab.on {
   color: var(--text);

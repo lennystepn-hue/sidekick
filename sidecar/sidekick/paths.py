@@ -36,6 +36,13 @@ def log_dir() -> Path:
     return path
 
 
+def brainstorms_dir() -> Path:
+    """Scratch working directories of brainstorm sessions (Claude Code needs a cwd)."""
+    path = app_data_dir() / "brainstorms"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def package_dir() -> Path:
     """Directory that holds bundled resources (sounds, prompts, models).
 

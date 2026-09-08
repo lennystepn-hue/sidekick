@@ -88,6 +88,25 @@ class ClaudeSettings(BaseModel):
     last_cwd: str = ""
 
 
+class BrainstormSettings(BaseModel):
+    # Partner model for the conversation and the model that writes the project documents.
+    model: str = "claude-opus-5"
+    docs_model: str = "claude-opus-5"
+    # Replies are spoken verbatim (the prompt keeps them short); no Haiku summary in between.
+    speak_replies: bool = True
+    # After a spoken reply, open the microphone again (round trip without a tap).
+    auto_listen: bool = False
+    # Adaptive thinking makes replies slower but more considered; off keeps the voice loop snappy.
+    thinking: bool = False
+
+
+class ProjectsSettings(BaseModel):
+    # Folder that receives materialized brainstorms; created on first use.
+    base_dir: str = "~/Projects"
+    git_init: bool = True
+    start_session_after_create: bool = True
+
+
 class Settings(BaseModel):
     server: ServerSettings = Field(default_factory=ServerSettings)
     presence: PresenceSettings = Field(default_factory=PresenceSettings)
@@ -98,6 +117,8 @@ class Settings(BaseModel):
     delivery: DeliverySettings = Field(default_factory=DeliverySettings)
     btw: BtwSettings = Field(default_factory=BtwSettings)
     claude: ClaudeSettings = Field(default_factory=ClaudeSettings)
+    brainstorm: BrainstormSettings = Field(default_factory=BrainstormSettings)
+    projects: ProjectsSettings = Field(default_factory=ProjectsSettings)
 
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:

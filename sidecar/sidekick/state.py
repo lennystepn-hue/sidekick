@@ -13,6 +13,7 @@ Glasses = Literal["unknown", "disconnected", "connected"]
 Mode = Literal["idle", "listening", "transcribing", "reviewing", "speaking", "btw_listening"]
 Attention = Literal["none", "waiting_input"]
 SessionStatus = Literal["idle", "running", "waiting", "stopped"]
+SessionKind = Literal["code", "brainstorm"]
 
 
 @dataclass(slots=True)
@@ -34,6 +35,8 @@ class SessionInfo:
     title: str = ""
     sdk_session_id: str | None = None
     last_active: str = ""
+    kind: SessionKind = "code"
+    project_path: str | None = None
 
 
 @dataclass(slots=True)

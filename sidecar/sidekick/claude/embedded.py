@@ -9,6 +9,7 @@ Several sessions can run at once (see `sessions.SessionManager`); each instance 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -20,12 +21,14 @@ from ..config import Settings
 from ..db import Database, new_id, now_iso
 from ..events import EventBus
 from ..state import AppState, SessionInfo
+from .idea import IdeaState, StreamFilter, split_idea_block
 
 log = logging.getLogger(__name__)
 
 DoneHandler = Callable[[str], Awaitable[None] | None]
 SETTING_SOURCES = ["user", "project", "local"]
 TITLE_MAX = 60
+BRAINSTORM_PROMPT = "brainstorm"
 
 
 @dataclass
@@ -139,8 +142,12 @@ class EmbeddedSession:
         self.cwd: str | None = None
         self.info: SessionInfo | None = None
         self.title_auto = True
+        self.kind: str = "code"
+        self.idea: IdeaState | None = None
+        self.project_path: str | None = None
         self._last_assistant_text = ""
         self._stream_message_id: str | None = None
+        self._stream_filter: StreamFilter | None = None
         self._interrupted = False
 
     # --- helpers -------------------------------------------------------
@@ -150,10 +157,37 @@ class EmbeddedSession:
 
         return ClaudeSDKClient(options)
 
+    @property
+    def is_brainstorm(self) -> bool:
+        return self.kind == "brainstorm"
+
     def _build_options(self, cwd: str, model: str | None, resume: str | None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
 
-        cfg = self._settings().claude
+        from .utility import cli_stderr, load_prompt
+
+        settings = self._settings()
+        cfg = settings.claude
+        if self.is_brainstorm:
+            # A conversation partner without tools or project settings: the system prompt
+            # replaces Claude Code's, nothing from the scratch cwd leaks in.
+            bs = settings.brainstorm
+            return ClaudeAgentOptions(
+                cwd=cwd,
+                model=model or bs.model or None,
+                system_prompt=load_prompt(BRAINSTORM_PROMPT),
+                tools=[],
+                allowed_tools=[],
+                setting_sources=[],
+                strict_mcp_config=True,
+                thinking={"type": "adaptive"} if bs.thinking else {"type": "disabled"},
+                permission_mode="dontAsk",
+                include_partial_messages=True,
+                cli_path=cfg.cli_path or None,
+                resume=resume or None,
+                env={"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                stderr=cli_stderr,  # piped stderr; inheriting ours fails in the packaged app
+            )
         return ClaudeAgentOptions(
             cwd=cwd,
             model=model or cfg.session_model or None,
@@ -163,6 +197,7 @@ class EmbeddedSession:
             setting_sources=list(SETTING_SOURCES),
             cli_path=cfg.cli_path or None,
             resume=resume or None,
+            stderr=cli_stderr,
         )
 
     @property
@@ -217,26 +252,46 @@ class EmbeddedSession:
             "message_count": self._db.count_messages(info.id),
             "pending": len(self.pending),
             "resumable": bool(info.sdk_session_id) and not self.running,
+            "kind": info.kind,
+            "project_path": info.project_path,
+            "idea": self.idea.to_dict() if self.idea is not None else None,
         }
 
     # --- lifecycle -----------------------------------------------------
     async def start(
-        self, cwd: str, model: str | None = None, resume: str | None = None, title: str | None = None
+        self,
+        cwd: str,
+        model: str | None = None,
+        resume: str | None = None,
+        title: str | None = None,
+        kind: str = "code",
+        project_path: str | None = None,
+        idea: IdeaState | None = None,
     ) -> SessionInfo:
         if self._client is not None:
             await self.stop()
         self.session_id = self.session_id or new_id()
         self.sdk_session_id = resume
         self.cwd = cwd
+        self.kind = kind
+        self.project_path = project_path
+        self.idea = idea
         self._last_assistant_text = ""
         self._interrupted = False
-        self.title_auto = not title
+        # Brainstorms keep an automatic title as long as the user never renamed them: the
+        # partner's idea title replaces the placeholder, not the first spoken sentence.
+        self.title_auto = not title or (self.is_brainstorm and title == "Brainstorm")
         options = self._build_options(cwd, model, resume)
         client = self._client_factory(options)
         await client.connect()
         self._client = client
-        cfg = self._settings().claude
+        settings = self._settings()
+        cfg = settings.claude
         now = now_iso()
+        if self.is_brainstorm:
+            model = model or settings.brainstorm.model
+            title = title or (idea.title if idea and idea.title else "Brainstorm")
+        permission_mode = "dontAsk" if self.is_brainstorm else cfg.permission_mode
         self.info = SessionInfo(
             id=self.session_id,
             cwd=cwd,
@@ -244,10 +299,12 @@ class EmbeddedSession:
             status="idle",
             model=model or "",
             started_at=now,
-            permission_mode=cfg.permission_mode,
+            permission_mode=permission_mode,
             title=title or Path(cwd).name or cwd,
             sdk_session_id=resume,
             last_active=now,
+            kind=kind,  # type: ignore[arg-type]
+            project_path=project_path,
         )
         self._db.add_session(
             self.session_id,
@@ -255,9 +312,10 @@ class EmbeddedSession:
             "embedded",
             title=self.info.title,
             model=model or "",
-            permission_mode=cfg.permission_mode,
+            permission_mode=permission_mode,
             sdk_session_id=resume,
             title_auto=self.title_auto,
+            kind=kind,
         )
         self._notify()
         self._clear_attention()
@@ -294,7 +352,7 @@ class EmbeddedSession:
         msg = self._db.add_message(self.session_id, "user", [{"type": "text", "text": text}])
         self._bus.publish("message", msg)
         fields: dict[str, Any] = {"status": "running", "last_active": now_iso()}
-        if self.title_auto and self.info is not None:
+        if self.title_auto and self.info is not None and not self.is_brainstorm:
             fields["title"] = auto_title(text)
             self.title_auto = False
             self._db.update_session(self.session_id, title=fields["title"], title_auto=False)
@@ -323,8 +381,35 @@ class EmbeddedSession:
             self._set(permission_mode=mode)
 
     def on_settings_changed(self, old: Settings, new: Settings) -> None:
+        if self.is_brainstorm:
+            return
         if old.claude.permission_mode != new.claude.permission_mode and self.running:
             asyncio.ensure_future(self.set_permission_mode(new.claude.permission_mode))
+
+    # --- brainstorm ----------------------------------------------------
+    def set_project_path(self, path: str | None) -> None:
+        self.project_path = path
+        if self.session_id:
+            self._db.update_session(self.session_id, project_path=path)
+        self._set(project_path=path)
+
+    def _apply_idea(self, data: dict[str, Any] | None) -> None:
+        if not data:
+            return
+        idea = IdeaState.from_dict(data, now_iso())
+        if idea.is_empty and self.idea is not None:
+            return  # a degenerate block never wipes a good state
+        self.idea = idea
+        if not self.session_id:
+            return
+        fields: dict[str, Any] = {"idea_state": json.dumps(idea.to_dict(), ensure_ascii=False)}
+        if self.title_auto and idea.title:
+            fields["title"] = " ".join(idea.title.split())[:TITLE_MAX]
+        self._db.update_session(self.session_id, **fields)
+        if "title" in fields:
+            self._set(title=fields["title"])
+        self._notify()
+        self._bus.publish("idea_state", {"session_id": self.session_id, "state": idea.to_dict()})
 
     # --- permissions ---------------------------------------------------
     async def _can_use_tool(self, tool_name: str, tool_input: dict[str, Any], context: Any) -> Any:
@@ -427,6 +512,20 @@ class EmbeddedSession:
                 self._set(status="stopped")
                 self._clear_attention()
 
+    def _strip_idea_blocks(self, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Remove the idea-state block from text blocks and apply it; drop emptied blocks."""
+        out: list[dict[str, Any]] = []
+        for block in blocks:
+            if block["type"] != "text":
+                out.append(block)
+                continue
+            visible, data = split_idea_block(block.get("text") or "")
+            if data is not None:
+                self._apply_idea(data)
+            if visible:
+                out.append({**block, "text": visible})
+        return out
+
     def _record_sdk_id(self, sdk_id: str | None) -> None:
         if sdk_id and sdk_id != self.sdk_session_id:
             self.sdk_session_id = sdk_id
@@ -443,23 +542,29 @@ class EmbeddedSession:
             etype = ev.get("type")
             if etype == "message_start":
                 self._stream_message_id = (ev.get("message") or {}).get("id") or new_id()
+                self._stream_filter = StreamFilter() if self.is_brainstorm else None
             elif etype == "content_block_delta":
                 delta = ev.get("delta") or {}
                 if delta.get("type") == "text_delta" and delta.get("text"):
-                    self._bus.publish(
-                        "assistant_delta",
-                        {
-                            "session_id": sid,
-                            "message_id": self._stream_message_id or "stream",
-                            "text": delta["text"],
-                        },
-                    )
+                    text = delta["text"]
+                    if self._stream_filter is not None:
+                        text = self._stream_filter.feed(text)
+                    if text:
+                        self._bus.publish(
+                            "assistant_delta",
+                            {
+                                "session_id": sid,
+                                "message_id": self._stream_message_id or "stream",
+                                "text": text,
+                            },
+                        )
             elif etype == "message_stop":
                 self._bus.publish(
                     "assistant_stream_end",
                     {"session_id": sid, "message_id": self._stream_message_id or "stream"},
                 )
                 self._stream_message_id = None
+                self._stream_filter = None
             return
         if isinstance(message, SystemMessage):
             if message.subtype == "init":
@@ -473,6 +578,10 @@ class EmbeddedSession:
             ]
             if not blocks:
                 return
+            if self.is_brainstorm:
+                blocks = self._strip_idea_blocks(blocks)
+                if not blocks:
+                    return
             text = "\n".join(b["text"] for b in blocks if b["type"] == "text").strip()
             if text:
                 self._last_assistant_text = text

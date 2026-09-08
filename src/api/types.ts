@@ -18,6 +18,9 @@ export interface AudioState {
   routed_to_glasses: boolean;
 }
 
+/** "code": Claude Code in a project folder. "brainstorm": a partner conversation that grows an IdeaState. */
+export type SessionKind = "code" | "brainstorm";
+
 export interface Session {
   id: string;
   cwd: string;
@@ -26,6 +29,76 @@ export interface Session {
   model: string;
   started_at: string;
   permission_mode?: string;
+  /** Older sidecars omit it; a missing kind means "code". */
+  kind?: SessionKind;
+  /** Brainstorms only: the folder of the materialized project, once "Projekt anlegen" ran. */
+  project_path?: string | null;
+}
+
+export const isBrainstorm = (s: Pick<Session, "kind"> | null | undefined): boolean => s?.kind === "brainstorm";
+
+// ---------- Brainstorm ----------
+
+/** Structured state of an idea; the sidecar updates it after every partner reply. */
+export interface IdeaState {
+  title: string;
+  one_liner: string;
+  problem: string;
+  users: string;
+  core_features: string[];
+  non_goals: string[];
+  stack: string[];
+  decisions: string[];
+  open_questions: string[];
+  next_steps: string[];
+  /** 0-100 rubric: core clear (25), users (20), MVP scope (25), tech (15), no blocking questions (15). */
+  readiness: number;
+  ready: boolean;
+  updated_at: string;
+}
+
+export type MaterializeStatus = "running" | "done" | "error";
+
+export interface MaterializeJob {
+  job_id: string;
+  status: MaterializeStatus;
+  step: number;
+  total: number;
+  label: string;
+  message?: string;
+  project_path?: string;
+  code_session_id?: string;
+  /** Non-fatal problems collected along the way (placeholder documents, skipped git, …). */
+  warnings?: string[];
+}
+
+export interface BrainstormInfo {
+  state: IdeaState | null;
+  project_path: string | null;
+  materialized: boolean;
+  files: string[];
+  job: MaterializeJob | null;
+}
+
+export interface MaterializeOptions {
+  name?: string;
+  base_dir?: string;
+  git_init?: boolean;
+  start_session?: boolean;
+}
+
+export interface ProjectSuggestion {
+  slug: string;
+  path: string;
+  exists: boolean;
+}
+
+export interface SessionCreateOptions {
+  kind?: SessionKind;
+  /** Optional for brainstorms; the sidecar uses a scratch folder. */
+  cwd?: string;
+  model?: string;
+  title?: string;
 }
 
 /** One entry of `GET /sessions`: every known session, including stopped ones from the database. */
@@ -41,6 +114,10 @@ export interface SessionSummary extends Session {
   pending: number;
   /** Stopped sessions with a known SDK session id can be resumed. */
   resumable: boolean;
+  kind: SessionKind;
+  project_path: string | null;
+  /** Brainstorms: the last known idea state (live updates arrive as `idea_state` events). */
+  idea: IdeaState | null;
 }
 
 export interface BluetoothAdapterState {
@@ -338,6 +415,18 @@ export interface ClaudeSettings {
   last_cwd: string;
 }
 
+export interface BrainstormSettings {
+  model: string;
+  docs_model: string;
+  speak_replies: boolean;
+  auto_listen: boolean;
+}
+export interface ProjectsSettings {
+  base_dir: string;
+  git_init: boolean;
+  start_session_after_create: boolean;
+}
+
 export interface Settings {
   server: ServerSettings;
   presence: PresenceSettings;
@@ -348,6 +437,8 @@ export interface Settings {
   delivery: DeliverySettings;
   btw: BtwSettings;
   claude: ClaudeSettings;
+  brainstorm: BrainstormSettings;
+  projects: ProjectsSettings;
 }
 
 export type DeepPartial<T> = {
@@ -386,6 +477,14 @@ export interface ErrorEvent {
   module: string;
   message: string;
 }
+export interface IdeaStateEvent {
+  session_id: string;
+  state: IdeaState;
+}
+/** One event per step of a materialize job; `status` is the job's status after this step. */
+export interface MaterializeProgress extends MaterializeJob {
+  session_id: string;
+}
 
 interface WsBase<T extends string, D> {
   type: T;
@@ -406,6 +505,8 @@ export type WsEvent =
   | WsBase<"spoken", SpokenEvent>
   | WsBase<"hook_event", HookEvent>
   | WsBase<"error", ErrorEvent>
+  | WsBase<"idea_state", IdeaStateEvent>
+  | WsBase<"materialize_progress", MaterializeProgress>
   /** Not in the contract table, but the sidecar broadcasts the full settings after every PUT /settings. */
   | WsBase<"settings", Settings>;
 

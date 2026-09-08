@@ -39,6 +39,10 @@
   --err-edge: color-mix(in oklch, var(--err) 45%, transparent);
   --run: oklch(0.72 0.12 250);
   --run-dim: color-mix(in oklch, var(--run) 14%, transparent);
+  /* "idea": brainstorms in the sidebar, the readiness ring, the Idee tab. Soft violet. */
+  --idea: oklch(0.72 0.12 300);
+  --idea-dim: color-mix(in oklch, var(--idea) 14%, transparent);
+  --idea-edge: color-mix(in oklch, var(--idea) 45%, transparent);
 
   /* ---- type ---- */
   --display: "Bricolage Grotesque Variable", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
@@ -351,6 +355,10 @@ input[type="range"] {
   color: var(--run);
   background: var(--run-dim);
 }
+.chip.idea {
+  color: var(--idea);
+  background: var(--idea-dim);
+}
 
 .badge {
   min-width: 18px;
@@ -390,6 +398,9 @@ input[type="range"] {
 }
 .dot.run {
   background: var(--run);
+}
+.dot.idea {
+  background: var(--idea);
 }
 .dot.pulse {
   animation: pulse 1.6s ease-in-out infinite;
@@ -610,6 +621,7 @@ pre.code {
   --warn: oklch(0.7 0.14 82);
   --err: oklch(0.58 0.17 25);
   --run: oklch(0.55 0.15 250);
+  --idea: oklch(0.55 0.14 300);
   --shadow: 0 10px 28px -8px oklch(0.4 0.03 60 / 0.28), 0 1px 0 oklch(1 0 0 / 0.8) inset;
   --orb-l: 0.74;
   --orb-c: 0.15;

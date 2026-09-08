@@ -2,21 +2,26 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { api, ApiError, WS_URL } from "../api/client";
 import { SidecarSocket } from "../api/ws";
-import type {
-  AppState,
-  BtwExchange,
-  ExternalSession,
-  GestureLogEntry,
-  HookScope,
-  Message,
-  PermissionDecision,
-  PermissionRequest,
-  PermissionResolution,
-  SessionSummary,
-  SoundName,
-  SpokenEvent,
-  Transcript,
-  WsEvent,
+import {
+  isBrainstorm,
+  type AppState,
+  type BtwExchange,
+  type ExternalSession,
+  type GestureLogEntry,
+  type HookScope,
+  type IdeaState,
+  type MaterializeJob,
+  type MaterializeOptions,
+  type MaterializeStatus,
+  type Message,
+  type PermissionDecision,
+  type PermissionRequest,
+  type PermissionResolution,
+  type SessionSummary,
+  type SoundName,
+  type SpokenEvent,
+  type Transcript,
+  type WsEvent,
 } from "../api/types";
 import type { TrayColor } from "../tauri";
 import { toMillis, uid } from "../utils/format";
@@ -28,6 +33,18 @@ export interface ToastItem {
   title?: string;
   message: string;
   ts: number;
+}
+
+/** One row of the materialize progress list; built from the per-step `materialize_progress` events. */
+export interface MaterializeStep {
+  step: number;
+  label: string;
+  status: MaterializeStatus;
+  message?: string;
+}
+/** The latest job snapshot plus every step seen so far (the events only carry the current one). */
+export interface MaterializeJobView extends MaterializeJob {
+  steps: MaterializeStep[];
 }
 
 const MAX_GESTURES = 50;
@@ -67,6 +84,10 @@ export const useAppStore = defineStore("app", () => {
   const errors = ref<ToastItem[]>([]);
   const externalSessions = ref<ExternalSession[]>([]);
   const lastSpoken = ref<SpokenEvent | null>(null);
+  /** Idea state per brainstorm session: fed by `idea_state` events and by `idea` on the session summaries. */
+  const ideaBySession = ref<Record<string, IdeaState>>({});
+  /** Materialize jobs per brainstorm session (latest snapshot plus step list). */
+  const materializeJobs = ref<Record<string, MaterializeJobView>>({});
 
   let socket: SidecarSocket | null = null;
   let everConnected = false;
@@ -102,6 +123,15 @@ export const useAppStore = defineStore("app", () => {
   const hasEmbeddedSession = computed(
     () => session.value !== null && session.value.mode === "embedded" && session.value.status !== "stopped",
   );
+  const activeIsBrainstorm = computed(() => isBrainstorm(activeSummary.value ?? session.value));
+  const activeIdea = computed<IdeaState | null>(() => {
+    const id = activeSessionId.value;
+    return (id ? ideaBySession.value[id] : undefined) ?? activeSummary.value?.idea ?? null;
+  });
+  const activeJob = computed<MaterializeJobView | null>(() => {
+    const id = activeSessionId.value;
+    return (id ? materializeJobs.value[id] : undefined) ?? null;
+  });
   /** The active session is stopped but can be resumed in place. */
   const canResume = computed(() => {
     const s = activeSummary.value;
@@ -160,6 +190,8 @@ export const useAppStore = defineStore("app", () => {
   function dropSessionData(id: string): void {
     delete messagesBySession.value[id];
     delete streamingBySession.value[id];
+    delete ideaBySession.value[id];
+    delete materializeJobs.value[id];
     loadedSessions.delete(id);
     pending.value = pending.value.filter((p) => p.session_id !== id);
   }
@@ -177,6 +209,35 @@ export const useAppStore = defineStore("app", () => {
     if (i >= 0) st.sessions[i] = s;
     else st.sessions.unshift(s);
     if (st.active_session_id === s.id) st.session = s;
+  }
+  /** Newer idea states win; `state` events may carry an older snapshot than a live `idea_state` did. */
+  function adoptIdea(id: string, idea: IdeaState | null | undefined): void {
+    if (!idea) return;
+    const cur = ideaBySession.value[id];
+    if (cur && toMillis(cur.updated_at) > toMillis(idea.updated_at)) return;
+    ideaBySession.value[id] = idea;
+  }
+  function adoptIdeas(list: SessionSummary[]): void {
+    for (const s of list) if (isBrainstorm(s)) adoptIdea(s.id, s.idea);
+  }
+  /** Folds one job snapshot into the per-session view: earlier steps are finished, the current one gets the status. */
+  function applyProgress(sid: string, p: MaterializeJob): void {
+    const prev = materializeJobs.value[sid];
+    const steps: MaterializeStep[] = prev && prev.job_id === p.job_id ? prev.steps.map((s) => ({ ...s })) : [];
+    for (const s of steps) if (s.step < p.step && s.status === "running") s.status = "done";
+    if (p.step > 0) {
+      const entry: MaterializeStep = { step: p.step, label: p.label, status: p.status, message: p.message };
+      const i = steps.findIndex((s) => s.step === p.step);
+      if (i >= 0) steps[i] = entry;
+      else steps.push(entry);
+      steps.sort((a, b) => a.step - b.step);
+    }
+    if (p.status === "done") for (const s of steps) if (s.status === "running") s.status = "done";
+    materializeJobs.value[sid] = { ...p, steps };
+    if (p.status === "done" && p.project_path) {
+      const s = state.value?.sessions.find((x) => x.id === sid);
+      if (s && s.project_path !== p.project_path) applySummary({ ...s, project_path: p.project_path });
+    }
   }
   function setActive(id: string | null): void {
     const st = state.value;
@@ -220,7 +281,10 @@ export const useAppStore = defineStore("app", () => {
         if (!hasList) next.sessions = prev?.sessions ?? [];
         if (next.active_session_id === undefined) next.active_session_id = next.session?.id ?? null;
         state.value = next;
-        if (hasList) pruneSessions(new Set(next.sessions.map((s) => s.id)));
+        if (hasList) {
+          pruneSessions(new Set(next.sessions.map((s) => s.id)));
+          adoptIdeas(next.sessions);
+        }
         else if (prev?.session && !next.session) pending.value = [];
         // A stopped session neither finishes its stream nor waits for input: drop partial text and requests.
         const stopped = new Set(next.sessions.filter((s) => s.status === "stopped").map((s) => s.id));
@@ -265,6 +329,14 @@ export const useAppStore = defineStore("app", () => {
       case "error":
         notify(ev.data.message, "error", ev.data.module);
         break;
+      case "idea_state":
+        adoptIdea(ev.data.session_id, ev.data.state);
+        break;
+      case "materialize_progress": {
+        const { session_id, ...job } = ev.data;
+        applyProgress(session_id, job);
+        break;
+      }
       case "settings":
         break;
     }
@@ -315,6 +387,7 @@ export const useAppStore = defineStore("app", () => {
     if (s.active_session_id === undefined) s.active_session_id = s.session?.id ?? null;
     const active = s.active_session_id ?? s.session?.id ?? null;
     state.value = s;
+    adoptIdeas(s.sessions);
     pending.value = sessionInfo.pending ?? [];
     // Only the active session's history is fresh after a (re)sync; the others reload on activation.
     messagesBySession.value = active ? { [active]: pick(msgs, [], "Nachrichten") } : {};
@@ -409,16 +482,24 @@ export const useAppStore = defineStore("app", () => {
     return job;
   }
 
+  /** A freshly created session has no history to load; it becomes the active one right away. */
+  function adoptNewSession(s: SessionSummary): SessionSummary {
+    messagesBySession.value[s.id] = [];
+    delete streamingBySession.value[s.id];
+    loadedSessions.add(s.id);
+    applySummary(s);
+    setActive(s.id);
+    return s;
+  }
   const createSession = (cwd: string, model?: string, title?: string) =>
+    run(async () => adoptNewSession(await api.sessionCreate({ kind: "code", cwd, model, title })), "Session");
+  /** A brainstorm needs no folder; the sidecar keeps it in a scratch directory. */
+  const createBrainstorm = (title?: string) =>
     run(async () => {
-      const s = await api.sessionCreate(cwd, model, title);
-      messagesBySession.value[s.id] = [];
-      delete streamingBySession.value[s.id];
-      loadedSessions.add(s.id);
-      applySummary(s);
-      setActive(s.id);
+      const s = adoptNewSession(await api.sessionCreate({ kind: "brainstorm", title }));
+      adoptIdea(s.id, s.idea);
       return s;
-    }, "Session");
+    }, "Brainstorm");
   /** Legacy name; `/session/start` creates a new session as well. */
   const startSession = (cwd: string, model?: string) => createSession(cwd, model);
 
@@ -478,6 +559,35 @@ export const useAppStore = defineStore("app", () => {
       return s;
     }, "Session");
   const sendToSession = (id: string, text: string) => run(() => api.sessionSendTo(id, text), "Senden");
+
+  // ---------- brainstorm / projects ----------
+  /** Idea state, project path and a possibly running job of one brainstorm; missing routes stay quiet. */
+  const loadBrainstorm = (id: string) =>
+    run(
+      async () => {
+        const info = await api.brainstormGet(id);
+        adoptIdea(id, info.state);
+        if (info.job) applyProgress(id, info.job);
+        const s = state.value?.sessions.find((x) => x.id === id);
+        if (s && info.project_path && s.project_path !== info.project_path) applySummary({ ...s, project_path: info.project_path });
+        return info;
+      },
+      "Brainstorm",
+      { silent: true },
+    );
+  const materialize = (id: string, opts: MaterializeOptions = {}) =>
+    run(async () => {
+      const r = await api.brainstormMaterialize(id, opts);
+      // The first progress event may already be in; only seed a placeholder when it is not.
+      if (materializeJobs.value[id]?.job_id !== r.job_id) {
+        materializeJobs.value[id] = { job_id: r.job_id, status: "running", step: 0, total: 0, label: "Startet …", steps: [] };
+      }
+      return r;
+    }, "Projekt anlegen");
+  /** Starts (or restarts) the code session in the materialized project; it becomes the active one. */
+  const kickoff = (id: string) => run(async () => adoptNewSession(await api.brainstormKickoff(id)), "Session");
+  const openProject = (path: string) => run(() => api.projectsOpen(path), "Projekt");
+  const suggestProject = (title: string) => run(() => api.projectsSuggest(title), "Projekt", { silent: true });
   const sendText = (text: string) => {
     const id = activeSessionId.value;
     return id ? sendToSession(id, text) : run(() => api.sessionSend(text), "Senden");
@@ -581,6 +691,8 @@ export const useAppStore = defineStore("app", () => {
     errors,
     externalSessions,
     lastSpoken,
+    ideaBySession,
+    materializeJobs,
     // derived
     session,
     sessions,
@@ -591,6 +703,9 @@ export const useAppStore = defineStore("app", () => {
     activePending,
     pendingBySession,
     hasEmbeddedSession,
+    activeIsBrainstorm,
+    activeIdea,
+    activeJob,
     canResume,
     isListening,
     glassesConnected,
@@ -609,6 +724,7 @@ export const useAppStore = defineStore("app", () => {
     // actions
     ensureMessages,
     createSession,
+    createBrainstorm,
     startSession,
     activateSession,
     resumeSession,
@@ -616,6 +732,11 @@ export const useAppStore = defineStore("app", () => {
     deleteSession,
     renameSession,
     sendToSession,
+    loadBrainstorm,
+    materialize,
+    kickoff,
+    openProject,
+    suggestProject,
     interrupt,
     sendText,
     resolvePermission,

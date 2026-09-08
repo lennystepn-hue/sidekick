@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
-import type { SessionSummary } from "../api/types";
+import { isBrainstorm, type SessionSummary } from "../api/types";
 import { useAppStore } from "../stores/app";
 import { basename, fmtRelative, SESSION_STATUS_LABEL } from "../utils/format";
 import Orb from "./Orb.vue";
@@ -17,11 +17,22 @@ const menuOpen = ref(false);
 const busy = ref(false);
 
 const stopped = computed(() => props.session.status === "stopped");
-const displayTitle = computed(() => props.session.title?.trim() || basename(props.session.cwd));
+const brainstorm = computed(() => isBrainstorm(props.session));
+const displayTitle = computed(() => props.session.title?.trim() || (brainstorm.value ? "Brainstorm" : basename(props.session.cwd)));
 const statusText = computed(() => SESSION_STATUS_LABEL[props.session.status] ?? props.session.status);
 const when = computed(() => fmtRelative(props.session.last_active, props.now));
+/** Brainstorms: the live idea state if one arrived, else the snapshot on the summary. */
+const readiness = computed(() => {
+  if (!brainstorm.value) return null;
+  const idea = app.ideaBySession[props.session.id] ?? props.session.idea;
+  return idea ? Math.round(idea.readiness) : null;
+});
+const subtitle = computed(() => (brainstorm.value ? "Brainstorm" : basename(props.session.cwd)));
+const hover = computed(() => `${brainstorm.value ? "Brainstorm" : props.session.cwd}\n${statusText.value}`);
+/* Waiting always wins (attention); brainstorms wear the idea hue, code sessions show "running". */
 const ringColor = computed(() => {
   if (props.session.status === "waiting") return "var(--warn)";
+  if (brainstorm.value) return stopped.value ? "color-mix(in oklch, var(--idea) 40%, transparent)" : "var(--idea)";
   if (props.session.status === "running") return "color-mix(in oklch, var(--run) 70%, transparent)";
   return "transparent";
 });
@@ -83,7 +94,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
       tabindex="0"
       :aria-current="active ? 'true' : undefined"
       :aria-label="`${displayTitle} · ${statusText}`"
-      :title="`${session.cwd}\n${statusText}`"
+      :title="hover"
       @click="activate"
       @dblclick="startEdit"
       @keydown="onKey"
@@ -103,11 +114,22 @@ const remove = () => act(() => app.deleteSession(props.session.id));
             @click.stop
             @dblclick.stop
           />
-          <span v-else class="title ellipsis">{{ displayTitle }}</span>
+          <template v-else>
+            <svg v-if="brainstorm" class="spark" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 1.5c.5 2.9 1.9 4.4 4.9 5-3 .6-4.4 2.1-4.9 5-.5-2.9-1.9-4.4-4.9-5 3-.6 4.4-2.1 4.9-5z" />
+            </svg>
+            <span class="title ellipsis">{{ displayTitle }}</span>
+          </template>
           <span v-if="pending" class="badge" :title="`${pending} offene Anfrage${pending === 1 ? '' : 'n'}`">{{ pending }}</span>
         </div>
         <div class="line sub muted">
-          <span class="mono dir ellipsis">{{ basename(session.cwd) }}</span>
+          <span class="dir ellipsis" :class="{ mono: !brainstorm }">
+            {{ subtitle }}<template v-if="readiness !== null"> · {{ readiness }} %</template>
+          </span>
+          <svg v-if="brainstorm && session.project_path" class="folder" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" role="img" aria-label="Projekt angelegt">
+            <title>Projekt: {{ session.project_path }}</title>
+            <path d="M1.5 4.5a1 1 0 011-1h3.2l1.6 1.5h6.2a1 1 0 011 1v6.5a1 1 0 01-1 1h-11a1 1 0 01-1-1z" />
+          </svg>
           <span class="when">{{ when }}</span>
         </div>
       </div>
@@ -226,6 +248,17 @@ const remove = () => act(() => app.deleteSession(props.session.id));
   font-size: 13.5px;
   font-weight: 500;
   line-height: 19px;
+}
+.spark,
+.folder {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  color: var(--idea);
+}
+.folder {
+  width: 12px;
+  height: 12px;
 }
 .item.active .title {
   color: var(--text);
