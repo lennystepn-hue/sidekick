@@ -65,6 +65,10 @@ pnpm tauri build --config src-tauri/tauri.release.conf.json          # MSI/NSIS 
 
 Der Gestentest in den Einstellungen zeigt jedes Roh-Event. Damit klärt sich am ersten Tag, ob "Halten" bei dir überhaupt ankommt. Solange die Brille verbunden ist, werden die Media-Keys geschluckt, damit Spotify nicht mitspielt.
 
+## Optik
+
+Gestaltung nach `.impeccable.md`: warme, getönte Grautöne mit Bernstein-Akzent, Bricolage Grotesque für Titel, Instrument Sans als Fließtext, Monospace nur für Code. Jede Session hat einen eigenen Farbverlauf-Orb (deterministisch aus der Session-ID), die "Aura" im Header ist Sidekicks lebender Orb: dreht langsam, atmet beim Sprechen, pulsiert beim Zuhören, wird golden beim Warten und blüht einmal auf, wenn Claude fertig ist. Unter Einstellungen → System gibt es Dunkel, Hell und System; reduzierte Bewegung wird respektiert. Audit-Berichte: `docs/design/`.
+
 ## Mehrere Sessions
 
 Die linke Seitenleiste listet alle Sessions. Mehrere können gleichzeitig laufen (jede hat ihren eigenen Claude-Code-Prozess); Sprache und Transkript gehen immer an die aktive Session, und wenn mehrere laufen, nennt die Ansage die Session beim Namen. Sessions werden in SQLite gespeichert, inklusive der Claude-Code-Session-ID: Eine beendete Session lässt sich später fortsetzen, Claude kennt dann den bisherigen Verlauf (`resume` des Agent SDK). Der Titel wird aus der ersten Nachricht gebildet und kann umbenannt werden. Sessions aus der Zeit vor dieser Funktion lassen sich nur ansehen, nicht fortsetzen.
