@@ -28,7 +28,7 @@ const sections = computed<Section[]>(() =>
     { id: "tts", label: "Sprachausgabe", lead: "Die Stimme, mit der Sidekick antwortet." },
     { id: "presence", label: "Anwesenheit", lead: "Wann Sidekick dich am Rechner vermutet." },
     { id: "sounds", label: "Töne", lead: "Kurze Signale für fertig, Fehler und Co." },
-    ...(isTauri() ? [{ id: "system", label: "System", lead: "Autostart und der Sidecar." }] : []),
+    { id: "system", label: "System", lead: isTauri() ? "Erscheinungsbild, Autostart und der Sidecar." : "Erscheinungsbild und der Sidecar." },
     { id: "claude", label: "Claude", lead: "Modelle, Freigaben und die Zustellung ohne Session." },
     { id: "hooks", label: "Hooks", lead: "Claude Code im Terminal an Sidekick anschließen." },
   ] as Section[],

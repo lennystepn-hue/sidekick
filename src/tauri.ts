@@ -60,6 +60,17 @@ export async function onTrayCommand(cb: (cmd: TrayCommand) => void): Promise<() 
   }
 }
 
+/** Follow the UI theme with the native window (title bar); no-op outside Tauri. */
+export async function setWindowTheme(theme: "dark" | "light"): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setTheme(theme);
+  } catch {
+    /* older shells without setTheme */
+  }
+}
+
 export async function openExternal(url: string): Promise<void> {
   if (!isTauri()) {
     window.open(url, "_blank", "noopener");

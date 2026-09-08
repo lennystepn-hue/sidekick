@@ -4,11 +4,13 @@ import { api, BASE_URL } from "../../api/client";
 import type { HealthResponse } from "../../api/types";
 import { useAppStore } from "../../stores/app";
 import { isAutostartEnabled, isTauri, setAutostart } from "../../tauri";
-import { checked } from "../../utils/form";
+import { useTheme } from "../../composables/theme";
+import { checked, strFrom } from "../../utils/form";
 import SettingRow from "./SettingRow.vue";
 
 const app = useAppStore();
 const tauri = isTauri();
+const theme = useTheme();
 const autostart = ref(false);
 const busy = ref(false);
 const health = ref<HealthResponse | null>(null);
@@ -44,6 +46,18 @@ function uptime(s: number): string {
 </script>
 
 <template>
+  <SettingRow label="Erscheinungsbild" hint="Dunkel ist der Standard. System folgt der Windows-Einstellung." input-id="sys-theme">
+    <select
+      id="sys-theme"
+      class="select narrow"
+      :value="theme.preference.value"
+      @change="theme.preference.value = strFrom($event) as 'system' | 'dark' | 'light'"
+    >
+      <option value="dark">Dunkel</option>
+      <option value="light">Hell</option>
+      <option value="system">System</option>
+    </select>
+  </SettingRow>
   <SettingRow v-if="tauri" label="Autostart" hint="Sidekick beim Anmelden im Tray starten.">
     <label class="check">
       <input type="checkbox" :checked="autostart" :disabled="busy" @change="toggleAutostart" />

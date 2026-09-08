@@ -88,10 +88,10 @@ async function toggleGlasses(): Promise<void> {
       <button class="btn" @click="toggleGlasses">{{ app.glassesConnected ? "Trennen" : "Verbinden" }}</button>
       <button class="btn btn-icon btn-ghost" title="Einstellungen" aria-label="Einstellungen" @click="emit('open-settings')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
-          <circle cx="8" cy="8" r="2.2" />
-          <path
-            d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"
-          />
+          <path d="M2 4.5h12M2 8h12M2 11.5h12" />
+          <circle cx="6" cy="4.5" r="1.6" fill="var(--panel)" />
+          <circle cx="10.5" cy="8" r="1.6" fill="var(--panel)" />
+          <circle cx="5" cy="11.5" r="1.6" fill="var(--panel)" />
         </svg>
       </button>
       <button

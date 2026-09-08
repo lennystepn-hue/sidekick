@@ -3,6 +3,7 @@ import { computed, nextTick, ref } from "vue";
 import type { SessionSummary } from "../api/types";
 import { useAppStore } from "../stores/app";
 import { basename, fmtRelative, SESSION_STATUS_LABEL } from "../utils/format";
+import Orb from "./Orb.vue";
 import SessionMenu from "./SessionMenu.vue";
 
 const props = defineProps<{ session: SessionSummary; active: boolean; pending: number; now: number }>();
@@ -19,6 +20,11 @@ const stopped = computed(() => props.session.status === "stopped");
 const displayTitle = computed(() => props.session.title?.trim() || basename(props.session.cwd));
 const statusText = computed(() => SESSION_STATUS_LABEL[props.session.status] ?? props.session.status);
 const when = computed(() => fmtRelative(props.session.last_active, props.now));
+const ringColor = computed(() => {
+  if (props.session.status === "waiting") return "var(--warn)";
+  if (props.session.status === "running") return "color-mix(in oklch, var(--run) 70%, transparent)";
+  return "transparent";
+});
 
 function activate(): void {
   if (editing.value || busy.value) return;
@@ -82,7 +88,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
       @dblclick="startEdit"
       @keydown="onKey"
     >
-      <span class="bar" aria-hidden="true"></span>
+      <Orb :seed="session.id" :size="20" :spin="session.status === 'running'" :ring="ringColor" class="orb" />
       <div class="text">
         <div class="line">
           <input
@@ -105,6 +111,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
           <span class="when">{{ when }}</span>
         </div>
       </div>
+      <span class="state" :class="session.status" :title="statusText" aria-hidden="true"></span>
     </div>
     <button
       ref="moreBtn"
@@ -167,23 +174,36 @@ const remove = () => act(() => app.deleteSession(props.session.id));
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-/* Activity bar: a slim status line instead of a border around the row. */
-.bar {
-  width: 3px;
-  flex-shrink: 0;
-  border-radius: 2px;
-  background: transparent;
-  transition: background-color var(--dur) var(--ease-out);
+/* Identity orb on the left, a small status light on the right (like a project list). */
+.orb {
+  align-self: center;
 }
-.item.running .bar {
+.item.stopped .orb {
+  filter: saturate(0.35);
+  opacity: 0.75;
+}
+.state {
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--border-strong);
+  transition: background-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+}
+.state.idle {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-dim);
+}
+.state.running {
   background: var(--run);
+  box-shadow: 0 0 0 3px var(--run-dim);
   animation: pulse 1.6s ease-in-out infinite;
 }
-.item.waiting .bar {
+.state.waiting {
   background: var(--warn);
-}
-.item.idle .bar {
-  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--warn-dim);
+  animation: pulse 2.4s ease-in-out infinite;
 }
 .item.stopped .title {
   color: var(--muted);
