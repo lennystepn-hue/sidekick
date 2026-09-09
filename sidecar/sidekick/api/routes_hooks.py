@@ -55,6 +55,17 @@ async def external_sessions(services: Services = Depends(get_services)) -> list[
     return services.hooks.list_sessions()
 
 
+@router.post("/sessions/external/{session_id}/activate")
+async def activate_external(session_id: str, services: Services = Depends(get_services)) -> dict[str, Any]:
+    """Make a terminal session the voice target (its channel, else the clipboard)."""
+    session = services.hooks.sessions.get(session_id) if services.hooks is not None else None
+    if session is None:
+        raise HTTPException(status_code=404, detail="Unbekannte Terminal-Session")
+    target = {"kind": "terminal", "session_id": session_id, "cwd": session.cwd}
+    services.state.update(voice_target=target)
+    return {"ok": True, "voice_target": target}
+
+
 @router.post("/sessions/external/{session_id}/defer")
 async def defer_external(session_id: str, services: Services = Depends(get_services)) -> dict[str, Any]:
     until = services.hooks.defer(session_id, services.settings.claude.defer_minutes)

@@ -368,3 +368,125 @@ def test_launch_permission_mode(tmp_path):
             == 200
         )
         assert "--permission-mode" in spawned[-1] and "default" in spawned[-1]
+
+
+def test_passive_channels_stay_out_of_routing(tmp_path):
+    services, spoken = _services(tmp_path)
+    cmdlines = {
+        100: ["claude", "--dangerously-load-development-channels", "server:sidekick"],
+        200: ["node", "claude.js", "-p", "--output-format", "stream-json"],  # a plain session
+    }
+    services.channels._cmdline_of = lambda pid: cmdlines.get(pid)
+    with TestClient(create_app(services)) as c:
+        with c.websocket_connect("/channel") as plain, c.websocket_connect("/channel") as real:
+            plain.send_json(
+                {
+                    "type": "hello",
+                    "cwd": str(tmp_path),
+                    "pid": 2,
+                    "ppid": 200,
+                    "name": "sidekick",
+                    "version": "0",
+                }
+            )
+            real.send_json(
+                {
+                    "type": "hello",
+                    "cwd": str(tmp_path / "proj"),
+                    "pid": 1,
+                    "ppid": 100,
+                    "name": "sidekick",
+                    "version": "0",
+                }
+            )
+            for _ in range(50):
+                st = c.get("/channel/status").json()
+                if st["passive"] == 1 and len(st["connections"]) == 1:
+                    break
+                time.sleep(0.01)
+            assert st["passive"] == 1 and [x["cwd"] for x in st["connections"]] == [str(tmp_path / "proj")]
+            # the hook flag ignores passive ones, voice never goes to them
+            c.post("/hook/SessionStart", json={"session_id": "t-plain", "cwd": str(tmp_path)})
+            for _ in range(50):
+                ext = [e for e in c.get("/sessions/external").json() if e["session_id"] == "t-plain"]
+                if ext:
+                    break
+                time.sleep(0.01)
+            assert ext[0]["channel"] is False
+            loop = services.bus._loop
+            assert (
+                asyncio.run_coroutine_threadsafe(
+                    RoutedDeliverer(services).deliver("hallo", "main"), loop
+                ).result(5)
+                == "channel"
+            )
+            assert _recv(real, "push")["content"] == "hallo"
+
+
+def test_terminal_voice_target(tmp_path):
+    services, spoken = _services(tmp_path)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    with TestClient(create_app(services)) as c:
+        assert c.post("/sessions/external/nope/activate").status_code == 404
+        c.post("/hook/SessionStart", json={"session_id": "t-a", "cwd": str(proj)})
+        c.post("/hook/SessionStart", json={"session_id": "t-b", "cwd": str(tmp_path)})
+        for _ in range(50):
+            if len(c.get("/sessions/external").json()) == 2:
+                break
+            time.sleep(0.01)
+        with c.websocket_connect("/channel") as wa, c.websocket_connect("/channel") as wb:
+            wa.send_json({"type": "hello", "cwd": str(proj), "pid": 1, "name": "sidekick", "version": "0"})
+            wb.send_json(
+                {"type": "hello", "cwd": str(tmp_path), "pid": 2, "name": "sidekick", "version": "0"}
+            )
+            for _ in range(50):
+                if len(c.get("/channel/status").json()["connections"]) == 2:
+                    break
+                time.sleep(0.01)
+            r = c.post("/sessions/external/t-a/activate")
+            assert r.status_code == 200 and r.json()["voice_target"]["cwd"] == str(proj)
+            assert c.get("/state").json()["voice_target"]["session_id"] == "t-a"
+            loop = services.bus._loop
+            assert (
+                asyncio.run_coroutine_threadsafe(
+                    RoutedDeliverer(services).deliver("an a", "main"), loop
+                ).result(5)
+                == "channel"
+            )
+            assert _recv(wa, "push")["content"] == "an a"
+            # switching to the other terminal moves the voice; an embedded session takes it back
+            c.post("/sessions/external/t-b/activate")
+            assert (
+                asyncio.run_coroutine_threadsafe(
+                    RoutedDeliverer(services).deliver("an b", "main"), loop
+                ).result(5)
+                == "channel"
+            )
+            assert _recv(wb, "push")["content"] == "an b"
+            services.sessions._client_factory = __import__(
+                "tests.test_sessions", fromlist=["FakeClient"]
+            ).FakeClient
+            created = c.post("/sessions", json={"cwd": str(tmp_path)}).json()
+            assert c.get("/state").json()["voice_target"] is None
+            assert (
+                asyncio.run_coroutine_threadsafe(
+                    RoutedDeliverer(services).deliver("an session", "main"), loop
+                ).result(5)
+                == "embedded"
+            )
+            # a terminal target without a channel falls back to the clipboard
+            c.post("/sessions/external/t-a/activate")
+        for _ in range(50):
+            if not c.get("/channel/status").json()["connections"]:
+                break
+            time.sleep(0.01)
+        assert (
+            asyncio.run_coroutine_threadsafe(
+                RoutedDeliverer(services).deliver("ohne kanal", "main"), loop
+            ).result(5)
+            == "clipboard"
+        )
+        assert services.clipboard_get() == "ohne kanal"
+        assert c.post(f"/sessions/{created['id']}/activate").status_code == 200
+        assert c.get("/state").json()["voice_target"] is None

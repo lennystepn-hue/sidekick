@@ -165,7 +165,7 @@ claude --remote-control <name> --dangerously-load-development-channels server:si
 
 and installs the HTTP hooks for that folder if they are missing. What you get:
 
-- What you say on the glasses goes straight into that session as a channel event, no clipboard, no SendInput.
+- What you say on the glasses goes straight into that session as a channel event, no clipboard, no SendInput. Click a terminal row in the sidebar to make it the voice target; clicking an embedded session takes the voice back.
 - The session's permission prompts are relayed to Sidekick: the glasses ask, "ja", "nein" or "später" answers, and the UI shows the same card.
 - Claude can talk back through a `reply` tool when you should hear something right now.
 - With `--remote-control`, the same session shows up in the Claude mobile app: approve there, watch there, get push notifications there. Sidekick sessions started through the Agent SDK cannot use Remote Control (the flag is ignored in headless mode), so this launcher is the way to get glasses and phone on one session.

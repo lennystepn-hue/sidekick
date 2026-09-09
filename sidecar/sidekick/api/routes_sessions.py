@@ -42,6 +42,11 @@ def _manager(services: Services):
     return services.sessions
 
 
+def _voice_to_sessions(services: Services) -> None:
+    """Embedded session chosen: spoken text goes there again."""
+    services.state.update(voice_target=None)
+
+
 def _summary_or_404(services: Services, session_id: str) -> dict[str, Any]:
     summary = _manager(services).summary(session_id)
     if summary is None:
@@ -65,6 +70,7 @@ async def create_session(body: CreateBody, services: Services = Depends(get_serv
             raise HTTPException(
                 status_code=500, detail=f"Brainstorm konnte nicht gestartet werden: {exc}"
             ) from exc
+        _voice_to_sessions(services)
         return session.summary()
     if not body.cwd:
         raise HTTPException(status_code=422, detail="cwd fehlt")
@@ -80,6 +86,7 @@ async def create_session(body: CreateBody, services: Services = Depends(get_serv
         save_settings(services.settings_path, services.settings)
     except OSError:
         pass
+    _voice_to_sessions(services)
     return session.summary()
 
 
@@ -97,13 +104,16 @@ async def adopt_session(body: AdoptBody, services: Services = Depends(get_servic
         raise HTTPException(status_code=500, detail=f"Session konnte nicht übernommen werden: {exc}") from exc
     if services.hooks is not None:
         services.hooks.mark_adopted(body.session_id, session.session_id)
+    _voice_to_sessions(services)
     return session.summary()
 
 
 @router.post("/sessions/{session_id}/activate")
 async def activate_session(session_id: str, services: Services = Depends(get_services)) -> dict[str, Any]:
     try:
-        return await _manager(services).activate(session_id)
+        summary = await _manager(services).activate(session_id)
+        _voice_to_sessions(services)
+        return summary
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Unbekannte Session") from exc
     except Exception as exc:  # noqa: BLE001
@@ -122,6 +132,7 @@ async def resume_session(session_id: str, services: Services = Depends(get_servi
         raise HTTPException(
             status_code=500, detail=f"Session konnte nicht fortgesetzt werden: {exc}"
         ) from exc
+    _voice_to_sessions(services)
     return session.summary()
 
 

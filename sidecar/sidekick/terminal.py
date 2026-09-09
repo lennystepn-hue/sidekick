@@ -53,6 +53,27 @@ def node_executable() -> str | None:
     return shutil.which("node")
 
 
+def process_cmdline(pid: int | None) -> list[str] | None:
+    """Command line of a running process (the channel server's parent = Claude Code)."""
+    if not pid:
+        return None
+    try:
+        import psutil
+
+        return list(psutil.Process(int(pid)).cmdline())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def is_channel_session(cmdline: list[str] | None) -> bool:
+    """True when that Claude Code process was started with the Sidekick channel enabled.
+    Claude Code starts every configured MCP server in every session, but only sessions that
+    name the server in `--channels`/`--dangerously-load-development-channels` treat it as a channel."""
+    if not cmdline:
+        return True  # unknown parent: assume the best
+    return any(MCP_NAME in arg and ("server:" in arg or "plugin:" in arg) for arg in cmdline)
+
+
 def install_command(script: Path, claude: str, node: str = "node") -> list[str]:
     return [claude, "mcp", "add", "--scope", "user", MCP_NAME, "--", node, str(script)]
 

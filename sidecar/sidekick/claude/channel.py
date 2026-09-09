@@ -43,15 +43,21 @@ class Channel:
     version: str
     send: Sender = field(repr=False)
     connected_at: float = field(default_factory=time.time)
+    ppid: int = 0
+    # The MCP server of a session that never opted the channel in: connected, but Claude Code
+    # drops everything we push. Kept out of routing, badges and the connection list.
+    passive: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "cwd": self.cwd,
             "pid": self.pid,
+            "ppid": self.ppid,
             "name": self.name,
             "version": self.version,
             "connected_at": self.connected_at,
+            "passive": self.passive,
         }
 
 
@@ -100,7 +106,9 @@ class ChannelHub:
         speaker: Any,
         summarizer: Summarizer,
         attention_refresh: Callable[[], None] | None = None,
+        cmdline_of: Callable[[int], list[str] | None] | None = None,
     ) -> None:
+        self._cmdline_of = cmdline_of
         self._state = state
         self._bus = bus
         self._settings = settings
@@ -113,20 +121,24 @@ class ChannelHub:
         self.relays: dict[str, RelayRequest] = {}
 
     # --- queries ---------------------------------------------------------
+    def active(self) -> list[Channel]:
+        return [c for c in self.channels.values() if not c.passive]
+
     def cwds(self) -> set[str]:
-        return {_norm(c.cwd) for c in self.channels.values() if c.cwd}
+        return {_norm(c.cwd) for c in self.active() if c.cwd}
 
     def for_cwd(self, cwd: str | None) -> Channel | None:
         if not cwd:
             return None
         target = _norm(cwd)
-        matches = [c for c in self.channels.values() if _norm(c.cwd) == target]
+        matches = [c for c in self.active() if _norm(c.cwd) == target]
         return max(matches, key=lambda c: c.connected_at) if matches else None
 
     def latest(self) -> Channel | None:
-        if not self.channels:
+        active = self.active()
+        if not active:
             return None
-        return max(self.channels.values(), key=lambda c: c.connected_at)
+        return max(active, key=lambda c: c.connected_at)
 
     def pick(self, cwd: str | None) -> Channel | None:
         """The channel of the given project, else the most recently connected one."""
@@ -166,14 +178,17 @@ class ChannelHub:
 
     def status(self) -> dict[str, Any]:
         return {
-            "connections": [
-                c.to_dict() for c in sorted(self.channels.values(), key=lambda c: c.connected_at)
-            ],
+            "connections": [c.to_dict() for c in sorted(self.active(), key=lambda c: c.connected_at)],
+            "passive": sum(1 for c in self.channels.values() if c.passive),
             "pending": [r.to_dict() for r in sorted(self.relays.values(), key=lambda r: r.ts)],
         }
 
     # --- lifecycle -------------------------------------------------------
     async def connect(self, hello: dict[str, Any], send: Sender) -> Channel:
+        ppid = int(hello.get("ppid") or 0)
+        cmdline = self._cmdline_of(ppid) if (ppid and self._cmdline_of is not None) else None
+        from ..terminal import is_channel_session
+
         channel = Channel(
             id=new_id(),
             cwd=str(hello.get("cwd") or ""),
@@ -181,10 +196,19 @@ class ChannelHub:
             name=str(hello.get("name") or "sidekick"),
             version=str(hello.get("version") or ""),
             send=send,
+            ppid=ppid,
+            passive=not is_channel_session(cmdline),
         )
         self.channels[channel.id] = channel
-        log.info("channel %s connected from %s (pid %s)", channel.id, channel.cwd or "?", channel.pid)
-        self._bus.publish("channel_connected", channel.to_dict())
+        log.info(
+            "channel %s connected from %s (pid %s%s)",
+            channel.id,
+            channel.cwd or "?",
+            channel.pid,
+            ", passive: session did not enable the channel" if channel.passive else "",
+        )
+        if not channel.passive:
+            self._bus.publish("channel_connected", channel.to_dict())
         self._refresh()
         return channel
 
@@ -196,7 +220,8 @@ class ChannelHub:
             del self.relays[relay.request_id]
             self._bus.publish("permission_resolved", {"id": relay.request_id, "decision": "dropped"})
         log.info("channel %s disconnected", channel_id)
-        self._bus.publish("channel_disconnected", channel.to_dict())
+        if not channel.passive:
+            self._bus.publish("channel_disconnected", channel.to_dict())
         self._refresh()
 
     async def handle(self, channel_id: str, msg: dict[str, Any]) -> None:
