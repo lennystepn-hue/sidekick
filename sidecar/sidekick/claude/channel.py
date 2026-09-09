@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 
 Sender = Callable[[dict[str, Any]], Awaitable[None]]
 RELAY_TTL_S = 15 * 60
+# A terminal session reports the same prompt twice: through the PermissionRequest hook and
+# through the channel relay. Whichever arrives second within this window stays silent.
+DEDUPE_S = 8.0
 
 
 def _norm(path: str) -> str:
@@ -62,6 +65,7 @@ class RelayRequest:
     spoken: str = ""
     ts: float = field(default_factory=time.time)
     snoozed_until: float | None = None
+    announced_ts: float = 0.0
 
     @property
     def snoozed(self) -> bool:
@@ -104,6 +108,7 @@ class ChannelHub:
         self._speaker = speaker
         self._summarizer = summarizer
         self._attention_refresh = attention_refresh
+        self.hooks: Any = None  # HookHandler, linked by the service wiring
         self.channels: dict[str, Channel] = {}
         self.relays: dict[str, RelayRequest] = {}
 
@@ -129,6 +134,31 @@ class ChannelHub:
 
     def any_active(self) -> bool:
         return any(not r.snoozed for r in self.relays.values())
+
+    def _cwd_of(self, relay: RelayRequest) -> str:
+        channel = self.channels.get(relay.channel_id)
+        return channel.cwd if channel is not None else ""
+
+    def announced_recently(self, cwd: str | None, within: float = DEDUPE_S) -> bool:
+        """A relay for this folder was read out within the window (hooks ask before speaking)."""
+        if not cwd:
+            return False
+        target = _norm(cwd)
+        now = time.time()
+        return any(
+            _norm(self._cwd_of(r)) == target and r.announced_ts and now - r.announced_ts < within
+            for r in self.relays.values()
+        )
+
+    def snooze_cwd(self, cwd: str | None, until: float | None) -> None:
+        """Mirror a hook-side deferral onto the relays of the same folder (no announcements)."""
+        if not cwd:
+            return
+        target = _norm(cwd)
+        for relay in self.relays.values():
+            if _norm(self._cwd_of(relay)) == target:
+                relay.snoozed_until = until
+        self._refresh()
 
     def oldest_relay(self) -> RelayRequest | None:
         open_ = [r for r in self.relays.values() if not r.snoozed]
@@ -207,6 +237,11 @@ class ChannelHub:
         self.relays[request_id] = relay
         self._bus.publish("permission_request", relay.to_dict())
         self._refresh()
+        cwd = self._cwd_of(relay)
+        if self.hooks is not None and self.hooks.prompt_announced_recently(cwd):
+            log.info("relay %s: the hook already read this prompt, staying quiet", request_id)
+            return
+        relay.announced_ts = time.time()
         self._sounds.play("needs_input")
         self._speaker.speak(relay.spoken, kind="needs_input")
 
@@ -223,6 +258,8 @@ class ChannelHub:
             except Exception as exc:  # noqa: BLE001
                 log.warning("sending verdict to channel %s failed: %s", relay.channel_id, exc)
         self._bus.publish("permission_resolved", {"id": request_id, "decision": behavior})
+        if self.hooks is not None:
+            self.hooks.clear_attention_cwd(self._cwd_of(relay))
         self._refresh()
         return True
 
@@ -235,6 +272,8 @@ class ChannelHub:
             "permission_deferred",
             {"id": request_id, "session_id": f"channel:{relay.channel_id}", "until": relay.snoozed_until},
         )
+        if self.hooks is not None:
+            self.hooks.snooze_cwd(self._cwd_of(relay), relay.snoozed_until)
         self._refresh()
         return relay.snoozed_until
 
@@ -244,6 +283,8 @@ class ChannelHub:
             return False
         relay.snoozed_until = None
         self._bus.publish("permission_woken", {"id": request_id, "session_id": f"channel:{relay.channel_id}"})
+        if self.hooks is not None:
+            self.hooks.snooze_cwd(self._cwd_of(relay), None)
         self._refresh()
         if announce and relay.spoken:
             self._sounds.play("needs_input")

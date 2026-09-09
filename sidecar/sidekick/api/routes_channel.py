@@ -30,11 +30,15 @@ class PushBody(BaseModel):
     meta: dict[str, str] | None = None
 
 
+PERMISSION_MODES = ("default", "acceptEdits", "auto", "bypassPermissions", "plan")
+
+
 class LaunchBody(BaseModel):
     cwd: str
     remote_control: bool = True
     channel: bool = True
     name: str | None = None
+    permission_mode: str | None = None
 
 
 def _hub(services: Services):
@@ -155,6 +159,8 @@ async def terminal_launch(body: LaunchBody, services: Services = Depends(get_ser
             raise HTTPException(
                 status_code=409, detail="Sidekick-Kanal ist nicht eingerichtet (Einstellungen → Hooks)"
             )
+    if body.permission_mode and body.permission_mode not in PERMISSION_MODES:
+        raise HTTPException(status_code=422, detail="Unbekannter Freigabemodus")
     try:
         return await asyncio.to_thread(
             terminal.launch,
@@ -164,6 +170,7 @@ async def terminal_launch(body: LaunchBody, services: Services = Depends(get_ser
             body.channel,
             body.name,
             services.terminal_spawn,
+            body.permission_mode or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

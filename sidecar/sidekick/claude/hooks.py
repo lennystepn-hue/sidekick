@@ -66,6 +66,7 @@ class ExternalSession:
     adopted_by: str | None = None  # Sidekick session that forked this one; announcements muted
     snoozed_until: float | None = None
     last_prompt: str = ""
+    last_prompt_ts: float = 0.0
 
     @property
     def snoozed(self) -> bool:
@@ -103,6 +104,7 @@ class HookHandler:
     ) -> None:
         self._quiet = quiet or (lambda: False)
         self._channel_cwds = channel_cwds or (lambda: set())
+        self.channels: Any = None  # ChannelHub, linked by the service wiring
         self._state = state
         self._bus = bus
         self._db = db
@@ -143,6 +145,32 @@ class HookHandler:
             return None
         return max(open_, key=lambda s: (s.last_ts, s.seq))
 
+    # --- channel relay counterpart ---------------------------------------
+    def sessions_for_cwd(self, cwd: str | None) -> list[ExternalSession]:
+        if not cwd:
+            return []
+        target = os.path.normcase(os.path.normpath(cwd))
+        return [
+            s for s in self.sessions.values() if s.cwd and os.path.normcase(os.path.normpath(s.cwd)) == target
+        ]
+
+    def prompt_announced_recently(self, cwd: str | None, within: float = 8.0) -> bool:
+        now = time.time()
+        return any(s.last_prompt_ts and now - s.last_prompt_ts < within for s in self.sessions_for_cwd(cwd))
+
+    def snooze_cwd(self, cwd: str | None, until: float | None) -> None:
+        """Mirror a relay-side deferral (or wake, until=None) onto the hook-side prompt."""
+        for session in self.sessions_for_cwd(cwd):
+            if session.attention:
+                session.snoozed_until = until
+        self._refresh_state()
+
+    def clear_attention_cwd(self, cwd: str | None) -> None:
+        for session in self.sessions_for_cwd(cwd):
+            session.attention = False
+            session.snoozed_until = None
+        self._refresh_state()
+
     # --- adoption / deferral --------------------------------------------
     def mark_adopted(self, session_id: str, by: str | None) -> None:
         session = self.sessions.get(session_id)
@@ -160,6 +188,8 @@ class HookHandler:
             "permission_deferred",
             {"id": session_id, "session_id": session_id, "until": session.snoozed_until},
         )
+        if self.channels is not None:
+            self.channels.snooze_cwd(session.cwd, session.snoozed_until)
         self._refresh_state()
         return session.snoozed_until
 
@@ -169,6 +199,8 @@ class HookHandler:
             return False
         session.snoozed_until = None
         self._bus.publish("permission_woken", {"id": session_id, "session_id": session_id})
+        if self.channels is not None:
+            self.channels.snooze_cwd(session.cwd, None)
         if announce and session.attention and session.active and session.last_prompt:
             self._sounds.play("needs_input")
             self._speaker.speak(session.last_prompt, kind="needs_input")
@@ -297,6 +329,12 @@ class HookHandler:
         session.last_prompt = spoken
         if session.adopted_by:
             return spoken
+        if self.channels is not None and self.channels.announced_recently(session.cwd):
+            log.info(
+                "hook prompt for %s: the channel relay already read it, staying quiet", session.session_id
+            )
+            return spoken
+        session.last_prompt_ts = time.time()
         self._sounds.play("needs_input")
         self._speaker.speak(spoken, kind="needs_input")
         return spoken

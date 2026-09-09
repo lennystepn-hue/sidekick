@@ -71,8 +71,11 @@ def build_launch_command(
     channel: bool = True,
     name: str | None = None,
     claude: str = "claude",
+    permission_mode: str | None = None,
 ) -> list[str]:
     cmd = ["wt.exe", "-d", cwd, "cmd.exe", "/k", claude]
+    if permission_mode:
+        cmd += ["--permission-mode", permission_mode]
     if remote_control:
         cmd.append("--remote-control")
         if name:
@@ -168,6 +171,7 @@ def launch(
     channel: bool = True,
     name: str | None = None,
     spawn: Callable[[list[str], str], Any] | None = None,
+    permission_mode: str | None = None,
 ) -> dict[str, Any]:
     """Open Windows Terminal with a Claude Code session in `cwd`. Installs Sidekick's HTTP
     hooks in the project's local settings first so announcements work either way."""
@@ -181,7 +185,9 @@ def launch(
             installer.install(path, "local", port)
     except Exception as exc:  # noqa: BLE001
         log.warning("hook install for %s failed: %s", path, exc)
-    cmd = build_launch_command(str(path), remote_control, channel, name, claude_in_terminal())
+    cmd = build_launch_command(
+        str(path), remote_control, channel, name, claude_in_terminal(), permission_mode
+    )
     if spawn is not None:
         spawn(cmd, str(path))
     else:

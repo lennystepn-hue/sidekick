@@ -533,6 +533,8 @@ def build_services(
         state, bus, settings, sounds, speaker, summarizer, attention_refresh=hooks.refresh_state
     )
     services.channel_setup = ChannelSetup() if hardware else None
+    hooks.channels = services.channels
+    services.channels.hooks = hooks
 
     # --- embedded sessions ---------------------------------------------------------
     def _prefix(session: EmbeddedSession) -> str:

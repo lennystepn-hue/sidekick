@@ -258,3 +258,113 @@ def test_channel_script_path_from_source():
 
     p = channel_script()
     assert p.name == "sidekick-channel.mjs" and Path(p).parts[-4:-1] == ("channels", "sidekick", "dist")
+
+
+def test_relay_and_hook_prompt_are_announced_once(tmp_path):
+    services, spoken = _services(tmp_path)
+    with TestClient(create_app(services)) as c:
+        with c.websocket_connect("/channel") as ws:
+            ws.send_json(
+                {"type": "hello", "cwd": str(tmp_path), "pid": 1, "name": "sidekick", "version": "0"}
+            )
+            for _ in range(50):
+                if c.get("/channel/status").json()["connections"]:
+                    break
+                time.sleep(0.01)
+            # the hook arrives first, the relay a moment later: one announcement
+            c.post(
+                "/hook/PermissionRequest",
+                json={
+                    "session_id": "t-dd",
+                    "cwd": str(tmp_path),
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ls", "description": "list"},
+                },
+            )
+            for _ in range(100):
+                if any(s[1] == "needs_input" for s in spoken):
+                    break
+                time.sleep(0.01)
+            ws.send_json(
+                {
+                    "type": "permission_request",
+                    "request_id": "aaaaa",
+                    "tool_name": "Bash",
+                    "description": "list",
+                    "input_preview": "ls",
+                }
+            )
+            for _ in range(100):
+                if c.get("/channel/status").json()["pending"]:
+                    break
+                time.sleep(0.01)
+            time.sleep(0.1)
+            assert sum(1 for s in spoken if s[1] == "needs_input") == 1
+            # deferring the relay also quiets the hook-side prompt; a verdict clears it
+            c.post("/channel/permission/aaaaa", json={"behavior": "defer"})
+            ext = next(e for e in c.get("/sessions/external").json() if e["session_id"] == "t-dd")
+            assert ext["snoozed_until"] and c.get("/state").json()["attention"] == "none"
+            c.post("/channel/permission/aaaaa", json={"behavior": "wake"})
+            ext = next(e for e in c.get("/sessions/external").json() if e["session_id"] == "t-dd")
+            assert ext["snoozed_until"] is None and c.get("/state").json()["attention"] == "waiting_input"
+            c.post("/channel/permission/aaaaa", json={"behavior": "deny"})
+            assert _recv(ws, "permission")["behavior"] == "deny"
+            ext = next(e for e in c.get("/sessions/external").json() if e["session_id"] == "t-dd")
+            assert ext["attention"] is False and c.get("/state").json()["attention"] == "none"
+            # relay first, then the hook: still one announcement; the hook-side defer mirrors back
+            n = sum(1 for s in spoken if s[1] == "needs_input")
+            ws.send_json(
+                {
+                    "type": "permission_request",
+                    "request_id": "bbbbb",
+                    "tool_name": "Write",
+                    "description": "write x",
+                    "input_preview": "",
+                }
+            )
+            for _ in range(100):
+                if sum(1 for s in spoken if s[1] == "needs_input") > n:
+                    break
+                time.sleep(0.01)
+            c.post(
+                "/hook/PermissionRequest",
+                json={
+                    "session_id": "t-dd",
+                    "cwd": str(tmp_path),
+                    "tool_name": "Write",
+                    "tool_input": {"file_path": "x"},
+                },
+            )
+            for _ in range(50):
+                ext = next(e for e in c.get("/sessions/external").json() if e["session_id"] == "t-dd")
+                if ext["attention"]:
+                    break
+                time.sleep(0.01)
+            time.sleep(0.1)
+            assert sum(1 for s in spoken if s[1] == "needs_input") == n + 1
+            assert c.post("/sessions/external/t-dd/defer").status_code == 200
+            assert c.get("/channel/status").json()["pending"][0]["snoozed_until"] is not None
+            assert c.get("/state").json()["attention"] == "none"
+
+
+def test_launch_permission_mode(tmp_path):
+    cmd = terminal.build_launch_command(r"C:\p", False, True, None, "claude", "default")
+    assert cmd[5:8] == ["claude", "--permission-mode", "default"]
+    services, spoken = _services(tmp_path)
+    spawned: list = []
+    services.terminal_spawn = lambda cmd, cwd: spawned.append(cmd)
+    with TestClient(create_app(services)) as c:
+        assert (
+            c.post(
+                "/terminal/launch", json={"cwd": str(tmp_path), "channel": False, "permission_mode": "yolo"}
+            ).status_code
+            == 422
+        )
+        assert (
+            c.post(
+                "/terminal/launch",
+                json={"cwd": str(tmp_path), "channel": False, "permission_mode": "default"},
+            ).status_code
+            == 200
+        )
+        assert "--permission-mode" in spawned[-1] and "default" in spawned[-1]
