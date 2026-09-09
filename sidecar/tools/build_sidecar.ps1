@@ -29,6 +29,21 @@ try {
         Copy-Item (Join-Path $dist "sidekick-sidecar.exe") (Join-Path $target "sidekick-sidecar-$triple.exe") -Force
     }
     Copy-Item (Join-Path $dist "_internal") (Join-Path $target "_internal") -Recurse -Force
+
+    # The Sidekick channel server (Claude Code channel) ships next to the sidecar under channel/.
+    $channelDir = Join-Path $repo "channels\sidekick"
+    if (Test-Path (Join-Path $channelDir "package.json")) {
+        Write-Host "== Channel server (esbuild) =="
+        Push-Location $repo
+        try {
+            pnpm --filter sidekick-channel build
+            if ($LASTEXITCODE -ne 0) { throw "channel build failed" }
+        } finally { Pop-Location }
+        $bundle = Join-Path $channelDir "dist\sidekick-channel.mjs"
+        if (-not (Test-Path $bundle)) { throw "missing $bundle" }
+        New-Item -ItemType Directory -Force (Join-Path $target "channel") | Out-Null
+        Copy-Item $bundle (Join-Path $target "channel\sidekick-channel.mjs") -Force
+    }
     $size = [math]::Round(((Get-ChildItem $target -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
     Write-Host "staged ($size MB)"
 

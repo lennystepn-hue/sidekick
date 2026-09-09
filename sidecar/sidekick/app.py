@@ -61,6 +61,7 @@ def _include_optional_routers(app: FastAPI) -> None:
         "routes_session",
         "routes_sessions",
         "routes_brainstorm",
+        "routes_channel",
         "routes_hooks",
         "routes_btw",
         "routes_gestures",

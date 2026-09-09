@@ -3,7 +3,8 @@
   "bundle": {
     "externalBin": ["binaries/sidekick-sidecar"],
     "resources": {
-      "binaries/_internal/": "_internal/"
+      "binaries/_internal/": "_internal/",
+      "binaries/channel/": "channel/"
     }
   }
 }

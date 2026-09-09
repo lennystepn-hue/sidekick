@@ -4,13 +4,18 @@ import { api, ApiError, WS_URL } from "../api/client";
 import { SidecarSocket } from "../api/ws";
 import {
   isBrainstorm,
+  isRelay,
   isSnoozed,
   type AppState,
   type BtwExchange,
+  type Channel,
+  type ChannelStatus,
   type ExternalSession,
   type GestureLogEntry,
   type HookScope,
   type IdeaState,
+  type LaunchOptions,
+  type LaunchResponse,
   type MaterializeJob,
   type MaterializeOptions,
   type MaterializeStatus,
@@ -18,6 +23,7 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PermissionResolution,
+  type RelayBehavior,
   type SessionSummary,
   type SoundName,
   type SpokenEvent,
@@ -25,7 +31,7 @@ import {
   type WsEvent,
 } from "../api/types";
 import type { TrayColor } from "../tauri";
-import { toMillis, uid } from "../utils/format";
+import { basename, toMillis, uid } from "../utils/format";
 
 export type ToastKind = "error" | "info" | "success";
 export interface ToastItem {
@@ -84,6 +90,13 @@ export const useAppStore = defineStore("app", () => {
   const gestureLog = ref<GestureLogEntry[]>([]);
   const errors = ref<ToastItem[]>([]);
   const externalSessions = ref<ExternalSession[]>([]);
+  /** Sidekick channel: setup status and connected channel servers; null until loaded (or when the sidecar has no hub). */
+  const channelStatus = ref<ChannelStatus | null>(null);
+  /**
+   * Permission prompts relayed from terminal sessions (`source: "channel"`). Kept apart from
+   * `pending`: they belong to no Sidekick session and are shown regardless of the active one.
+   */
+  const relays = ref<PermissionRequest[]>([]);
   const lastSpoken = ref<SpokenEvent | null>(null);
   /** Idea state per brainstorm session: fed by `idea_state` events and by `idea` on the session summaries. */
   const ideaBySession = ref<Record<string, IdeaState>>({});
@@ -142,8 +155,17 @@ export const useAppStore = defineStore("app", () => {
   const glassesConnected = computed(() => state.value?.glasses === "connected");
   /** Deferred ("Später") requests stay pending but do not count as waiting: the Aura stays calm until they wake. */
   const waitingInput = computed(
-    () => state.value?.attention === "waiting_input" || pending.value.some((p) => !isSnoozed(p.snoozed_until)),
+    () =>
+      state.value?.attention === "waiting_input" ||
+      pending.value.some((p) => !isSnoozed(p.snoozed_until)) ||
+      relays.value.some((p) => !isSnoozed(p.snoozed_until)),
   );
+  /** Connected channel servers by id, for naming a relay's terminal session. */
+  const channelById = computed<Record<string, Channel>>(() => {
+    const map: Record<string, Channel> = {};
+    for (const c of channelStatus.value?.connections ?? []) map[c.id] = c;
+    return map;
+  });
   const reviewing = computed(() => transcripts.value.filter((t) => t.status === "reviewing"));
   const trayColor = computed<TrayColor>(() => {
     const s = state.value;
@@ -267,10 +289,35 @@ export const useAppStore = defineStore("app", () => {
   function removePending(id: string): void {
     pending.value = pending.value.filter((p) => p.id !== id);
   }
-  /** Marks a pending request as deferred until `until` (unix seconds) or, with null, as awake again. */
+  /** Marks a pending request or relay as deferred until `until` (unix seconds) or, with null, as awake again. */
   function setSnooze(id: string, until: number | null): void {
-    const p = pending.value.find((x) => x.id === id);
+    const p = pending.value.find((x) => x.id === id) ?? relays.value.find((x) => x.id === id);
     if (p) p.snoozed_until = until;
+  }
+  function addRelay(p: PermissionRequest): void {
+    if (!relays.value.some((x) => x.id === p.id)) relays.value.push(p);
+  }
+  /** Returns true when a relay with that id was open. */
+  function removeRelay(id: string): boolean {
+    const had = relays.value.some((p) => p.id === id);
+    if (had) relays.value = relays.value.filter((p) => p.id !== id);
+    return had;
+  }
+  /** A fresh status replaces both the setup info and the relay list (the sidecar is authoritative). */
+  function applyChannelStatus(s: ChannelStatus | null): void {
+    channelStatus.value = s;
+    relays.value = s?.pending ?? [];
+  }
+  function upsertChannel(c: Channel): void {
+    const s = channelStatus.value;
+    if (!s) return;
+    const i = s.connections.findIndex((x) => x.id === c.id);
+    if (i >= 0) s.connections[i] = c;
+    else s.connections.push(c);
+  }
+  function removeChannel(id: string): void {
+    const s = channelStatus.value;
+    if (s) s.connections = s.connections.filter((x) => x.id !== id);
   }
 
   // ---------- websocket events ----------
@@ -321,11 +368,18 @@ export const useAppStore = defineStore("app", () => {
         upsertMessage(ev.data);
         break;
       case "permission_request":
-        addPending(ev.data);
+        if (isRelay(ev.data)) addRelay(ev.data);
+        else addPending(ev.data);
         break;
-      case "permission_resolved":
+      case "permission_resolved": {
         removePending(ev.data.id);
+        // "dropped": the channel went away before we answered; the terminal took the decision itself.
+        const wasRelay = removeRelay(ev.data.id);
+        if (wasRelay && ev.data.decision === "dropped") {
+          notify("Terminal-Session hat die Anfrage selbst beantwortet.", "info", "Kanal");
+        }
         break;
+      }
       case "permission_deferred":
         setSnooze(ev.data.id, ev.data.until);
         break;
@@ -352,6 +406,21 @@ export const useAppStore = defineStore("app", () => {
         applyProgress(session_id, job);
         break;
       }
+      // Channel servers come and go with their terminal sessions; the rows' "Kanal" badge follows.
+      case "channel_connected":
+        upsertChannel(ev.data);
+        notify(`Kanal verbunden: ${basename(ev.data.cwd) || ev.data.name}`, "success", "Kanal");
+        void loadExternalSessions();
+        break;
+      case "channel_disconnected":
+        removeChannel(ev.data.id);
+        notify(`Kanal getrennt: ${basename(ev.data.cwd) || ev.data.name}`, "info", "Kanal");
+        void loadExternalSessions();
+        break;
+      case "channel_push":
+      case "channel_reply":
+        // Pushed text shows up as a transcript, replies arrive as `spoken`; nothing extra to keep.
+        break;
       case "settings":
         break;
     }
@@ -381,13 +450,14 @@ export const useAppStore = defineStore("app", () => {
       if (!isUnreachable(e)) notify(errorText(e), "error", "Sidecar");
       return false;
     }
-    const [sess, list, msgs, ts, b, ext] = await Promise.allSettled([
+    const [sess, list, msgs, ts, b, ext, ch] = await Promise.allSettled([
       api.session(),
       api.sessions(),
       api.sessionMessages(200),
       api.transcripts(50),
       api.btw(50),
       api.externalSessions(),
+      api.channelStatus(),
     ]);
     const pick = <T>(r: PromiseSettledResult<T>, fallback: T, label: string): T => {
       if (r.status === "fulfilled") return r.value ?? fallback;
@@ -412,6 +482,8 @@ export const useAppStore = defineStore("app", () => {
     transcripts.value = byTsDesc(pick(ts, [], "Transkripte"));
     btw.value = byTsDesc(pick(b, [], "btw"));
     externalSessions.value = pick(ext, [], "Sessions");
+    // The channel hub is optional (503 without it); its absence is shown in the settings block, never toasted.
+    applyChannelStatus(ch.status === "fulfilled" ? (ch.value ?? null) : null);
     initialized.value = true;
     return true;
   }
@@ -727,6 +799,55 @@ export const useAppStore = defineStore("app", () => {
       return r;
     }, "Jetzt");
 
+  // ---------- Sidekick channel / terminal launcher ----------
+  /** Quiet: the settings block shows "nicht verfügbar" when the route is missing or the sidecar is down. */
+  const loadChannelStatus = () =>
+    run(
+      async () => {
+        const s = await api.channelStatus();
+        applyChannelStatus(s ?? null);
+        return s;
+      },
+      "Kanal",
+      { silent: true },
+    );
+  const installChannel = () =>
+    run(async () => {
+      const s = await api.channelInstall();
+      applyChannelStatus(s);
+      notify(s.installed ? "Sidekick-Kanal eingerichtet." : "Einrichten ohne Wirkung; siehe Ausgabe unten.", s.installed ? "success" : "error", "Kanal");
+      return s;
+    }, "Kanal");
+  const uninstallChannel = () =>
+    run(async () => {
+      const s = await api.channelUninstall();
+      applyChannelStatus(s);
+      notify("Sidekick-Kanal entfernt.", "info", "Kanal");
+      return s;
+    }, "Kanal");
+  /**
+   * Starts Windows Terminal with Claude Code in `cwd`. Throws the sidecar's German detail (409: channel not
+   * installed, 422: bad folder) so the launcher form can show it inline; success is toasted here.
+   */
+  async function launchTerminal(o: LaunchOptions): Promise<LaunchResponse> {
+    const r = await api.terminalLaunch(o);
+    notify(`Terminal gestartet in ${basename(o.cwd) || o.cwd}`, "success", "Terminal");
+    return r;
+  }
+  /** Like `resolvePermission`, for relays: allow/deny close the card, defer/wake only change its snooze. */
+  const resolveRelay = (id: string, behavior: RelayBehavior) =>
+    run(async () => {
+      const r = await api.channelPermission(id, behavior);
+      if (behavior === "defer") {
+        if (typeof r?.until === "number") setSnooze(id, r.until);
+      } else if (behavior === "wake") {
+        setSnooze(id, null);
+      } else {
+        removeRelay(id);
+      }
+      return r;
+    }, "Freigabe");
+
   return {
     // state
     state,
@@ -742,10 +863,13 @@ export const useAppStore = defineStore("app", () => {
     gestureLog,
     errors,
     externalSessions,
+    channelStatus,
+    relays,
     lastSpoken,
     ideaBySession,
     materializeJobs,
     // derived
+    channelById,
     session,
     sessions,
     activeSessionId,
@@ -815,6 +939,11 @@ export const useAppStore = defineStore("app", () => {
     adoptExternal,
     deferExternal,
     wakeExternal,
+    loadChannelStatus,
+    installChannel,
+    uninstallChannel,
+    launchTerminal,
+    resolveRelay,
   };
 });
 

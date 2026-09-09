@@ -48,6 +48,12 @@ try {
     $target = Join-Path $InstallDir "_internal"
     if (Test-Path $target) { Remove-Item -Recurse -Force $target }
     Copy-Item $internal $target -Recurse -Force
+    # Sidekick channel server (Node script) for terminal sessions; the sidecar looks for channel\ next to itself.
+    $channel = Join-Path $repo "src-tauri\binaries\channel"
+    if (Test-Path $channel) {
+        New-Item -ItemType Directory -Force (Join-Path $InstallDir "channel") | Out-Null
+        Copy-Item (Join-Path $channel "*") (Join-Path $InstallDir "channel") -Recurse -Force
+    }
 
     $restart = Join-Path $InstallDir "Sidekick neu starten.cmd"
     @'

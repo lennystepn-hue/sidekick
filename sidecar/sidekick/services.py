@@ -53,6 +53,9 @@ class Services:
     bluetooth_doctor: Any = None
     sessions: Any = None
     materializer: Any = None
+    channels: Any = None
+    channel_setup: Any = None
+    terminal_spawn: Callable[[list[str], str], Any] | None = None
     hooks: Any = None
     btw: Any = None
     listen: Any = None
@@ -229,6 +232,8 @@ class _Background:
                     self._s.sessions.tick_snoozes()
                 if self._s.hooks is not None:
                     self._s.hooks.tick_snoozes()
+                if self._s.channels is not None:
+                    self._s.channels.tick_snoozes()
             except Exception:  # noqa: BLE001
                 log.exception("snooze tick failed")
 
@@ -274,6 +279,16 @@ class RoutedDeliverer:
                 )
             s.sounds.play("ready_to_paste")
             return "answer"
+        relay = s.channels.oldest_relay() if s.channels is not None else None
+        if relay is not None:
+            decision = parse_decision(text)
+            if decision == "defer":
+                s.channels.defer(relay.request_id, s.settings.claude.defer_minutes)
+            else:
+                behavior = "allow" if decision in ("allow", "allow_always") else "deny"
+                await s.channels.verdict(relay.request_id, behavior)
+            s.sounds.play("ready_to_paste")
+            return "answer"
         waiting = s.hooks.waiting() if s.hooks is not None else None
         if waiting is not None and parse_decision(text) == "defer":
             s.hooks.defer(waiting.session_id, s.settings.claude.defer_minutes)
@@ -282,6 +297,12 @@ class RoutedDeliverer:
         if s.session is not None and s.session.running:
             await s.session.send(text)
             return "embedded"
+        latest_external = s.hooks.latest() if s.hooks is not None else None
+        channel = s.channels.pick(latest_external.cwd if latest_external else None) if s.channels else None
+        if channel is not None:
+            await s.channels.push(channel.id, text, {"kind": "voice"})
+            s.sounds.play("ready_to_paste")
+            return "channel"
         cfg = s.settings.delivery
         if not cfg.clipboard and not cfg.send_input:
             raise RuntimeError("Kein Zustellziel: Zwischenablage und SendInput sind beide deaktiviert")
@@ -323,6 +344,7 @@ def build_services(
     from .audio.vad import Segmenter, SegmenterConfig, SileroVad
     from .bluetooth_doctor import BluetoothDoctor
     from .claude.btw import BtwAssistant
+    from .claude.channel import ChannelHub
     from .claude.embedded import EmbeddedSession, PendingPermission
     from .claude.hooks import HookHandler
     from .claude.materialize import Materializer
@@ -471,6 +493,8 @@ def build_services(
                 services.sessions.wake_all_snoozed()
             if services.hooks is not None:
                 services.hooks.wake_all_snoozed()
+            if services.channels is not None:
+                services.channels.wake_all_snoozed()
         if name in ("became_present", "became_absent", "glasses_connected", "glasses_disconnected"):
             state.update(presence_manual=False)
         if name == "glasses_disconnected":
@@ -492,11 +516,25 @@ def build_services(
         speaker,
         summarizer,
         settings,
-        embedded_waiting=lambda: services.sessions.any_pending() if services.sessions else False,
+        embedded_waiting=lambda: (
+            (services.sessions.any_pending() if services.sessions else False)
+            or (services.channels.any_active() if services.channels else False)
+        ),
         ignore_session_ids=lambda: services.sessions.sdk_ids() if services.sessions else set(),
         quiet=services.quiet_now,
+        channel_cwds=lambda: services.channels.cwds() if services.channels else set(),
     )
     services.hooks = hooks
+
+    # --- sidekick channel (terminal sessions with the channel server) -------------------
+    from .terminal import ChannelSetup
+
+    services.channels = ChannelHub(
+        state, bus, settings, sounds, speaker, summarizer, attention_refresh=hooks.refresh_state
+    )
+    services.channel_setup = ChannelSetup() if hardware else None
+    hooks.channels = services.channels
+    services.channels.hooks = hooks
 
     # --- embedded sessions ---------------------------------------------------------
     def _prefix(session: EmbeddedSession) -> str:

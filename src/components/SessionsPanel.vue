@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useNow } from "../composables/now";
 import { useAppStore } from "../stores/app";
 import SessionItem from "./SessionItem.vue";
+import TerminalLauncher from "./TerminalLauncher.vue";
 import TerminalSessions from "./TerminalSessions.vue";
 
 const emit = defineEmits<{ (e: "close"): void; (e: "new"): void; (e: "brainstorm"): void }>();
@@ -15,6 +16,15 @@ const sessions = computed(() => app.sessions);
 const openRequests = computed(() =>
   sessions.value.reduce((n, s) => n + (app.pendingBySession[s.id] ?? s.pending), 0),
 );
+
+/** "Terminal" opens an inline form instead of a dialog; closing it hands focus back to the button. */
+const launcherOpen = ref(false);
+const terminalButton = ref<HTMLButtonElement | null>(null);
+async function closeLauncher(): Promise<void> {
+  launcherOpen.value = false;
+  await nextTick();
+  terminalButton.value?.focus();
+}
 </script>
 
 <template>
@@ -31,7 +41,7 @@ const openRequests = computed(() =>
       </button>
     </div>
 
-    <!-- Two ways in: a code session in a folder, or a brainstorm without one. -->
+    <!-- Three ways in: a code session in a folder, a brainstorm without one, or Claude Code in a terminal. -->
     <div class="new" role="group" aria-label="Neu anlegen">
       <button class="seg" title="Neue Session in einem Projektordner (Strg+Umschalt+N)" @click="emit('new')">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -45,7 +55,24 @@ const openRequests = computed(() =>
         </svg>
         Brainstorm
       </button>
+      <button
+        ref="terminalButton"
+        class="seg term"
+        :class="{ on: launcherOpen }"
+        title="Claude Code im Terminal starten, mit Remote Control und Sidekick-Kanal"
+        :aria-expanded="launcherOpen"
+        aria-controls="terminal-launcher"
+        @click="launcherOpen ? closeLauncher() : (launcherOpen = true)"
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 4.5l4 3.5-4 3.5M8.5 11.5H13" />
+        </svg>
+        Terminal
+      </button>
     </div>
+    <Transition name="rise">
+      <TerminalLauncher v-if="launcherOpen" id="terminal-launcher" @close="closeLauncher" />
+    </Transition>
 
     <ul v-if="sessions.length" class="list" role="list">
       <SessionItem
@@ -59,7 +86,7 @@ const openRequests = computed(() =>
     </ul>
     <div v-else class="empty">
       <p class="headline display">Noch keine Session.</p>
-      <p class="muted">„Session“ öffnet einen Projektordner, „Brainstorm“ legt direkt los.</p>
+      <p class="muted">„Session“ öffnet einen Projektordner, „Brainstorm“ legt direkt los, „Terminal“ startet Claude Code nebenan.</p>
     </div>
 
     <!-- Terminal sessions (hooks) sit below the Sidekick sessions, only while there are any. -->
@@ -103,14 +130,16 @@ const openRequests = computed(() =>
   background: var(--panel-2);
   overflow: hidden;
 }
+/* Three labels in a 208px sidebar: content-sized segments, tight padding, and the extra space shared. */
 .seg {
-  flex: 1;
+  flex: 1 1 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   height: 28px;
-  padding: 0 8px;
+  padding: 0 4px;
+  min-width: 0;
   border: 0;
   background: none;
   color: var(--text-2);
@@ -125,7 +154,8 @@ const openRequests = computed(() =>
 .seg + .seg {
   border-left: 1px solid var(--border-strong);
 }
-.seg:hover {
+.seg:hover,
+.seg.on {
   background: var(--panel-3);
   color: var(--text);
 }
@@ -143,6 +173,13 @@ const openRequests = computed(() =>
 }
 .seg.idea:hover {
   background: var(--idea-dim);
+}
+.seg.term svg {
+  color: var(--run);
+}
+.seg.term:hover,
+.seg.term.on {
+  background: var(--run-dim);
 }
 .list {
   flex: 1;

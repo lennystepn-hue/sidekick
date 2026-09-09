@@ -6,6 +6,7 @@ import { useAppStore } from "../stores/app";
 import { basename, shortPath } from "../utils/format";
 import Aura from "./Aura.vue";
 import MessageItem from "./MessageItem.vue";
+import PermissionCard from "./PermissionCard.vue";
 import ProjectCard from "./ProjectCard.vue";
 
 const app = useAppStore();
@@ -133,6 +134,14 @@ onBeforeUnmount(() => observer?.disconnect());
       </template>
       <span v-else class="mono muted session-cwd ellipsis" :title="active.cwd">{{ shortPath(active.cwd, 64) }}</span>
     </div>
+    <!-- Relayed prompts from terminal sessions belong to no Sidekick session: they sit above the transcript, whichever is active. -->
+    <Transition name="rise">
+      <div v-if="app.relays.length" class="relays" aria-label="Freigaben aus Terminal-Sessions">
+        <TransitionGroup name="rise" tag="div" class="relays-inner">
+          <PermissionCard v-for="p in app.relays" :key="p.id" :request="p" />
+        </TransitionGroup>
+      </div>
+    </Transition>
     <div ref="scroller" class="scroller" @scroll.passive="onScroll">
       <div v-if="isEmpty" class="empty">
         <Aura :size="64" />
@@ -200,6 +209,21 @@ onBeforeUnmount(() => observer?.disconnect());
 .project {
   max-width: 860px;
   margin: 18px auto 0;
+}
+.relays {
+  flex-shrink: 0;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.relays-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 860px;
+  margin: 0 auto;
 }
 .scroller {
   flex: 1;
