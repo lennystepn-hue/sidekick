@@ -34,12 +34,16 @@ try {
     if (-not $sidecarExe) { throw "missing staged sidecar exe in src-tauri/binaries" }
 
     Write-Host "== Installing into $InstallDir =="
-    $running = Get-Process -Name "sidekick", "sidekick-sidecar" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$InstallDir*" }
+    # The app, its sidecar, and the claude.exe processes the sidecar spawned from _internal
+    # (they outlive the sidecar and would keep _internal locked).
+    $running = Get-Process -Name "sidekick", "sidekick-sidecar", "claude", "node" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$InstallDir*" }
     if ($running) {
-        Write-Host "stopping running installed instance"
+        Write-Host "stopping running installed instance ($($running.Count) processes)"
         $running | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
+        Start-Sleep -Seconds 2
     }
+    $stray = Get-Process -Name "claude" -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$InstallDir*" }
+    if ($stray) { $stray | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
     Copy-Item $exe (Join-Path $InstallDir "sidekick.exe") -Force
     # The windows-gnu build links WebView2Loader.dll dynamically; it must sit next to the exe.
