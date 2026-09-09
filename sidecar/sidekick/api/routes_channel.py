@@ -103,9 +103,10 @@ async def channel_install(services: Services = Depends(get_services)) -> dict[st
     if setup is None:
         raise HTTPException(status_code=503, detail="Kanal nicht verfügbar")
     try:
-        return await asyncio.to_thread(setup.install)
+        info = await asyncio.to_thread(setup.install)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {**info, **_hub(services).status()}
 
 
 @router.post("/channel/uninstall")
@@ -113,7 +114,8 @@ async def channel_uninstall(services: Services = Depends(get_services)) -> dict[
     setup = services.channel_setup
     if setup is None:
         raise HTTPException(status_code=503, detail="Kanal nicht verfügbar")
-    return await asyncio.to_thread(setup.uninstall)
+    info = await asyncio.to_thread(setup.uninstall)
+    return {**info, **_hub(services).status()}
 
 
 @router.post("/channel/permission/{request_id}")
