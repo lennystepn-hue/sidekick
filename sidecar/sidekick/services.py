@@ -538,7 +538,7 @@ def build_services(
     services.hooks = hooks
 
     # --- sidekick channel (terminal sessions with the channel server) -------------------
-    from .terminal import ChannelSetup, process_cmdline
+    from .terminal import ChannelSetup, parent_pid, process_cmdline
 
     services.channels = ChannelHub(
         state,
@@ -549,6 +549,7 @@ def build_services(
         summarizer,
         attention_refresh=hooks.refresh_state,
         cmdline_of=process_cmdline if hardware else None,
+        parent_of=parent_pid if hardware else None,
     )
     services.channel_setup = ChannelSetup() if hardware else None
     hooks.channels = services.channels
