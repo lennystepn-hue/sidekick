@@ -64,7 +64,7 @@ mcp.onerror = (error) => log(`mcp error: ${error.message}`);
 
 const bridge = new Bridge({
   url: sidecarUrl,
-  hello: { cwd: process.cwd(), pid: process.pid, name: CHANNEL_NAME, version: CHANNEL_VERSION },
+  hello: { cwd: process.cwd(), pid: process.pid, ppid: process.ppid, name: CHANNEL_NAME, version: CHANNEL_VERSION },
   log,
 });
 

@@ -294,15 +294,26 @@ class RoutedDeliverer:
             s.hooks.defer(waiting.session_id, s.settings.claude.defer_minutes)
             s.sounds.play("ready_to_paste")
             return "answer"
-        if s.session is not None and s.session.running:
+        target = s.state.data.voice_target or {}
+        if target.get("kind") == "terminal":
+            # The user picked a terminal session: its channel, else the clipboard path below.
+            channel = s.channels.for_cwd(target.get("cwd")) if s.channels is not None else None
+            if channel is not None:
+                await s.channels.push(channel.id, text, {"kind": "voice"})
+                s.sounds.play("ready_to_paste")
+                return "channel"
+        elif s.session is not None and s.session.running:
             await s.session.send(text)
             return "embedded"
-        latest_external = s.hooks.latest() if s.hooks is not None else None
-        channel = s.channels.pick(latest_external.cwd if latest_external else None) if s.channels else None
-        if channel is not None:
-            await s.channels.push(channel.id, text, {"kind": "voice"})
-            s.sounds.play("ready_to_paste")
-            return "channel"
+        else:
+            latest_external = s.hooks.latest() if s.hooks is not None else None
+            channel = (
+                s.channels.pick(latest_external.cwd if latest_external else None) if s.channels else None
+            )
+            if channel is not None:
+                await s.channels.push(channel.id, text, {"kind": "voice"})
+                s.sounds.play("ready_to_paste")
+                return "channel"
         cfg = s.settings.delivery
         if not cfg.clipboard and not cfg.send_input:
             raise RuntimeError("Kein Zustellziel: Zwischenablage und SendInput sind beide deaktiviert")
@@ -527,10 +538,17 @@ def build_services(
     services.hooks = hooks
 
     # --- sidekick channel (terminal sessions with the channel server) -------------------
-    from .terminal import ChannelSetup
+    from .terminal import ChannelSetup, process_cmdline
 
     services.channels = ChannelHub(
-        state, bus, settings, sounds, speaker, summarizer, attention_refresh=hooks.refresh_state
+        state,
+        bus,
+        settings,
+        sounds,
+        speaker,
+        summarizer,
+        attention_refresh=hooks.refresh_state,
+        cmdline_of=process_cmdline if hardware else None,
     )
     services.channel_setup = ChannelSetup() if hardware else None
     hooks.channels = services.channels

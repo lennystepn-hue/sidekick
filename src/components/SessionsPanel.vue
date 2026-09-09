@@ -79,7 +79,7 @@ async function closeLauncher(): Promise<void> {
         v-for="s in sessions"
         :key="s.id"
         :session="s"
-        :active="s.id === app.activeSessionId"
+        :active="s.id === app.activeSessionId && !app.voiceGoesToTerminal"
         :pending="app.pendingBySession[s.id] ?? s.pending"
         :now="now"
       />

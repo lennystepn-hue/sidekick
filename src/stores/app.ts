@@ -28,6 +28,8 @@ import {
   type SoundName,
   type SpokenEvent,
   type Transcript,
+  type VoiceTarget,
+  type VoiceTargetResponse,
   type WsEvent,
 } from "../api/types";
 import type { TrayColor } from "../tauri";
@@ -136,6 +138,14 @@ export const useAppStore = defineStore("app", () => {
   });
   const hasEmbeddedSession = computed(
     () => session.value !== null && session.value.mode === "embedded" && session.value.status !== "stopped",
+  );
+  /** Where spoken text goes; null (or missing on older sidecars) means the active embedded session. */
+  const voiceTarget = computed<VoiceTarget | null>(() => state.value?.voice_target ?? null);
+  /** A terminal row was chosen: the embedded rows drop their active highlight, the composer shows the banner. */
+  const voiceGoesToTerminal = computed(() => voiceTarget.value?.kind === "terminal");
+  /** The embedded session "zurück zur Session" re-activates: the active one, else any that is not stopped; null hides the link. */
+  const voiceReturnId = computed<string | null>(
+    () => activeSessionId.value ?? sessions.value.find((s) => s.status !== "stopped")?.id ?? null,
   );
   const activeIsBrainstorm = computed(() => isBrainstorm(activeSummary.value ?? session.value));
   const activeIdea = computed<IdeaState | null>(() => {
@@ -270,6 +280,8 @@ export const useAppStore = defineStore("app", () => {
     if (!st) return;
     st.active_session_id = id;
     st.session = id ? (st.sessions.find((x) => x.id === id) ?? null) : null;
+    // Activating, creating, adopting or resuming an embedded session brings the voice back to it (contract).
+    if (id) st.voice_target = null;
   }
   function upsertTranscript(t: Transcript): void {
     const i = transcripts.value.findIndex((x) => x.id === t.id);
@@ -590,13 +602,17 @@ export const useAppStore = defineStore("app", () => {
   /** Legacy name; `/session/start` creates a new session as well. */
   const startSession = (cwd: string, model?: string) => createSession(cwd, model);
 
-  /** Switches the transcript immediately; the sidecar resumes a stopped session on activation. */
+  /**
+   * Switches the transcript immediately; the sidecar resumes a stopped session on activation. Re-activating
+   * the active session is a no-op, except while a terminal has the voice: then it brings the voice back.
+   */
   async function activateSession(id: string): Promise<SessionSummary | undefined> {
     const prev = activeSessionId.value;
-    if (prev === id) {
+    if (prev === id && !voiceGoesToTerminal.value) {
       void ensureMessages(id);
       return activeSummary.value ?? undefined;
     }
+    const prevTarget = voiceTarget.value;
     setActive(id);
     void ensureMessages(id);
     return run(async () => {
@@ -606,7 +622,10 @@ export const useAppStore = defineStore("app", () => {
         setActive(s.id);
         return s;
       } catch (e) {
-        if (activeSessionId.value === id) setActive(prev);
+        if (activeSessionId.value === id) {
+          setActive(prev);
+          if (state.value) state.value.voice_target = prevTarget;
+        }
         throw e;
       }
     }, "Session");
@@ -615,8 +634,14 @@ export const useAppStore = defineStore("app", () => {
     run(async () => {
       const s = await api.sessionResume(id);
       applySummary(s);
+      if (state.value) state.value.voice_target = null;
       return s;
     }, "Session");
+  /** "zurück zur Session" in the composer banner; does nothing when no embedded session exists. */
+  const voiceToSession = (): Promise<SessionSummary | undefined> => {
+    const id = voiceReturnId.value;
+    return id ? activateSession(id) : Promise.resolve(undefined);
+  };
   /** Without an id the active session is stopped. */
   const stopSession = (id?: string) =>
     run(async () => {
@@ -781,6 +806,26 @@ export const useAppStore = defineStore("app", () => {
       void loadExternalSessions();
       return s;
     }, "Übernehmen");
+  /**
+   * Row click in the "Terminal" group: spoken text goes to that terminal until an embedded session is
+   * activated again. Shown optimistically; the response and the next `state` event confirm.
+   */
+  async function activateTerminal(id: string): Promise<VoiceTargetResponse | undefined> {
+    const st = state.value;
+    const e = externalSessions.value.find((x) => x.session_id === id);
+    const prev = voiceTarget.value;
+    if (st && e) st.voice_target = { kind: "terminal", session_id: id, cwd: e.cwd };
+    return run(async () => {
+      try {
+        const r = await api.externalActivate(id);
+        if (state.value && r && "voice_target" in r) state.value.voice_target = r.voice_target ?? null;
+        return r;
+      } catch (err) {
+        if (state.value?.voice_target?.session_id === id) state.value.voice_target = prev;
+        throw err;
+      }
+    }, "Stimme");
+  }
   /** Quiets the terminal's permission prompt until `until`; the row shows it and offers "Jetzt". */
   const deferExternal = (id: string) =>
     run(async () => {
@@ -879,6 +924,9 @@ export const useAppStore = defineStore("app", () => {
     activePending,
     pendingBySession,
     hasEmbeddedSession,
+    voiceTarget,
+    voiceGoesToTerminal,
+    voiceReturnId,
     activeIsBrainstorm,
     activeIdea,
     activeJob,
@@ -904,6 +952,7 @@ export const useAppStore = defineStore("app", () => {
     startSession,
     activateSession,
     resumeSession,
+    voiceToSession,
     stopSession,
     deleteSession,
     renameSession,
@@ -937,6 +986,7 @@ export const useAppStore = defineStore("app", () => {
     loadGestureLog,
     loadExternalSessions,
     adoptExternal,
+    activateTerminal,
     deferExternal,
     wakeExternal,
     loadChannelStatus,

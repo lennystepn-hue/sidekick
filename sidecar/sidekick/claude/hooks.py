@@ -263,6 +263,10 @@ class HookHandler:
         if event == "SessionEnd":
             session.active = False
             session.attention = False
+            session.snoozed_until = None
+            target = self._state.data.voice_target or {}
+            if target.get("session_id") == session.session_id:
+                self._state.update(voice_target=None)  # the voice goes back to the sessions
             return "Session beendet"
         if event == "UserPromptSubmit":
             session.attention = False

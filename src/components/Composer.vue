@@ -4,6 +4,7 @@ import { useAppStore } from "../stores/app";
 import { useSettingsStore } from "../stores/settings";
 import { pickDirectory } from "../tauri";
 import { SESSION_STATUS_LABEL, shortPath } from "../utils/format";
+import VoiceTargetBar from "./VoiceTargetBar.vue";
 
 const app = useAppStore();
 const settingsStore = useSettingsStore();
@@ -110,6 +111,10 @@ function onKey(e: KeyboardEvent): void {
 
 <template>
   <div class="composer">
+    <!-- While a terminal row has the voice, typed text still goes to the session below; only speech is rerouted. -->
+    <Transition name="rise">
+      <VoiceTargetBar v-if="app.voiceGoesToTerminal" />
+    </Transition>
     <div class="session">
       <template v-if="session && (live || resumable)">
         <span class="dot" :class="statusDot"></span>
@@ -176,6 +181,7 @@ function onKey(e: KeyboardEvent): void {
       <p v-if="ended">
         Diese Session ist beendet und kann nicht fortgesetzt werden. Oben startet eine neue Session im selben Ordner.
       </p>
+      <p v-else-if="app.voiceGoesToTerminal">Keine eingebettete Session. Gesprochenes geht in die gewählte Terminal-Session.</p>
       <p v-else>
         Keine eingebettete Session. Spracheingaben landen in der Zwischenablage; der Ton „bereit zum Einfügen“
         bestätigt das, dann Strg+V im Terminal.
@@ -183,7 +189,7 @@ function onKey(e: KeyboardEvent): void {
       <!-- Terminal sessions live in the sidebar's "Terminal" group; here only a pointer. -->
       <p v-if="app.externalSessions.length && !ended" class="muted">
         {{ app.externalSessions.length === 1 ? "Eine Terminal-Session" : `${app.externalSessions.length} Terminal-Sessions` }}
-        in der Seitenleiste unter „Terminal“ – dort mit einem Klick übernehmen.
+        in der Seitenleiste unter „Terminal“ – anklicken, damit Gesprochenes dort landet, oder übernehmen.
       </p>
       <p v-else-if="!ended" class="muted">
         Keine Terminal-Sessions gemeldet. Hooks lassen sich unter Einstellungen → Hooks installieren.

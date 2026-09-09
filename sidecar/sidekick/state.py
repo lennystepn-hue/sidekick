@@ -70,6 +70,9 @@ class AppStateData:
     bluetooth_adapter: AdapterState = field(default_factory=AdapterState)
     models: ModelsState = field(default_factory=ModelsState)
     external_sessions: int = 0
+    # Where spoken text goes: None = the active embedded session; else a terminal session
+    # {"kind": "terminal", "session_id": ..., "cwd": ...} (its channel, or the clipboard).
+    voice_target: dict[str, Any] | None = None
     sessions: list[dict[str, Any]] = field(default_factory=list)
     active_session_id: str | None = None
 

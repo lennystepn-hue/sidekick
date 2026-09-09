@@ -29,6 +29,8 @@ export const HelloMessage = z.object({
   type: z.literal('hello'),
   cwd: z.string(),
   pid: z.number().int().nonnegative(),
+  /** Parent pid: the Claude Code process, so the sidecar can tell channel sessions from plain ones. */
+  ppid: z.number().int().nonnegative().optional(),
   name: z.string(),
   version: z.string(),
 });
