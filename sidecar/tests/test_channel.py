@@ -508,3 +508,20 @@ def test_voice_target_resets_when_the_terminal_ends(tmp_path):
                 break
             time.sleep(0.01)
         assert c.get("/state").json()["voice_target"] is None
+
+
+def test_hello_without_ppid_uses_the_parent_lookup(tmp_path):
+    services, spoken = _services(tmp_path)
+    services.channels._cmdline_of = lambda pid: ["claude", "-p"] if pid == 300 else None
+    services.channels._parent_of = lambda pid: 300 if pid == 3 else None
+    with TestClient(create_app(services)) as c:
+        with c.websocket_connect("/channel") as ws:
+            ws.send_json(
+                {"type": "hello", "cwd": str(tmp_path), "pid": 3, "name": "sidekick", "version": "0"}
+            )
+            for _ in range(50):
+                st = c.get("/channel/status").json()
+                if st["passive"] == 1:
+                    break
+                time.sleep(0.01)
+            assert st["passive"] == 1 and st["connections"] == []
