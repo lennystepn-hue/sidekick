@@ -131,6 +131,7 @@ const state: AppState = {
     stt_progress: 0,
   },
   external_sessions: 2,
+  voice_target: null,
 };
 
 const settings: Settings = {
@@ -442,7 +443,12 @@ const gestureLog: GestureLogEntry[] = [
   { ts: Date.now() / 1000 - 300, key: "stop", swallowed: false, gesture: "hold", action: "btw" },
 ];
 
-/** Terminal sessions known through the hooks: one waiting for a permission (with the spoken prompt), one idle. */
+/**
+ * Terminal sessions known through the hooks: one waiting for a permission (with the spoken prompt), one idle.
+ * Voice target, to click through: a click on either row sets `state.voice_target` (the row lights up, the
+ * composer shows "Stimme → Terminal"); clicking a Sidekick session, "zurück zur Session", "Übernehmen" or
+ * creating a session clears it again, exactly as the sidecar's embedded activate/create/adopt/resume do.
+ */
 const TERM_CWD = "C:\\Users\\dev\\Projects\\api-gateway";
 const TERM_IDLE_CWD = "C:\\Users\\dev\\Projects\\dotfiles";
 const TERM_COMMAND = "docker compose up -d";
@@ -655,6 +661,7 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     sessions.unshift(s);
     messagesBy[s.id] = [];
     activeId = s.id;
+    state.voice_target = null;
     pushState();
     return clone(s);
   }
@@ -842,10 +849,16 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
       if (!e) return Promise.reject(new ApiError("Terminal-Session nicht gefunden", 404, path));
       return sleep(700).then(() => adoptExternal(e, b));
     }
-    const ext = path.match(/^\/sessions\/external\/([^/]+)\/(defer|wake)$/);
+    const ext = path.match(/^\/sessions\/external\/([^/]+)\/(defer|wake|activate)$/);
     if (method === "POST" && ext) {
       const e = externalSessions.find((x) => x.session_id === decodeURIComponent(ext[1]!));
       if (!e) return Promise.reject(new ApiError("Terminal-Session nicht gefunden", 404, path));
+      if (ext[2] === "activate") {
+        // Spoken text goes to this terminal until an embedded session is activated again.
+        state.voice_target = { kind: "terminal", session_id: e.session_id, cwd: e.cwd };
+        pushState();
+        return sleep(120).then(() => ({ ok: true, voice_target: clone(state.voice_target) }));
+      }
       if (ext[2] === "defer") {
         const until = snoozeUntil();
         e.snoozed_until = until;
@@ -946,12 +959,14 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
         case "activate":
           activeId = id;
           if (s.status === "stopped" && s.resumable) s.status = "idle";
+          state.voice_target = null;
           touch(s);
           pushState();
           return sleep(80).then(() => clone(s));
         case "resume":
           if (s.status === "stopped" && !s.resumable) return Promise.reject(new ApiError("Session kann nicht fortgesetzt werden", 409, path));
           if (s.status === "stopped") s.status = "idle";
+          state.voice_target = null;
           touch(s);
           pushState();
           return sleep(250).then(() => clone(s));
@@ -1067,15 +1082,17 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
       const t = transcripts.find((x) => x.id === tr[1]);
       if (t) {
         const sent = tr[2] === "send";
+        // With a terminal as voice target the text goes through its channel, not into the embedded session.
+        const toTerminal = state.voice_target !== null;
         Object.assign(t, {
           status: sent ? "sent" : "cancelled",
           sent,
-          target: sent ? "embedded" : t.target,
+          target: sent ? (toTerminal ? "channel" : "embedded") : t.target,
           cleaned: sent && typeof b.text === "string" ? b.text : t.cleaned,
           review_deadline_ts: null,
         });
         emit("transcript", { ...t });
-        if (sent) simulateReply(activeId, t.cleaned);
+        if (sent && !toTerminal) simulateReply(activeId, t.cleaned);
       }
       return Promise.resolve({ ok: true });
     }
@@ -1091,7 +1108,7 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
   const deadlineMs = Number(reviewing.review_deadline_ts) * 1000 - Date.now();
   window.setTimeout(() => {
     if (reviewing.status !== "reviewing") return;
-    Object.assign(reviewing, { status: "sent", sent: true, target: "embedded", review_deadline_ts: null });
+    Object.assign(reviewing, { status: "sent", sent: true, target: state.voice_target ? "channel" : "embedded", review_deadline_ts: null });
     emit("transcript", { ...reviewing });
   }, Math.max(deadlineMs, 0));
 

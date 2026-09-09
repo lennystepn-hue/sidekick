@@ -35,6 +35,7 @@ import type {
   SettingsPatch,
   SoundName,
   Transcript,
+  VoiceTargetResponse,
 } from "./types";
 
 export const BASE_URL: string = (import.meta.env.VITE_SIDECAR_URL as string | undefined)?.replace(/\/$/, "")
@@ -178,6 +179,9 @@ export const api = {
   externalDefer: (id: string) =>
     request<DeferResponse>("POST", `/sessions/external/${encodeURIComponent(id)}/defer`),
   externalWake: (id: string) => request<{ ok: boolean }>("POST", `/sessions/external/${encodeURIComponent(id)}/wake`),
+  /** Makes the terminal session the voice target; any embedded activation below resets it (see `AppState.voice_target`). */
+  externalActivate: (id: string) =>
+    request<VoiceTargetResponse>("POST", `/sessions/external/${encodeURIComponent(id)}/activate`),
 
   // sessions (multiple concurrent embedded sessions; `/session/*` above acts on the active one)
   sessions: () => request<SessionSummary[]>("GET", "/sessions"),
