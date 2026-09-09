@@ -65,6 +65,18 @@ def process_cmdline(pid: int | None) -> list[str] | None:
         return None
 
 
+def parent_pid(pid: int | None) -> int | None:
+    """Parent of a running process (older channel servers do not report their ppid)."""
+    if not pid:
+        return None
+    try:
+        import psutil
+
+        return int(psutil.Process(int(pid)).ppid())
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def is_channel_session(cmdline: list[str] | None) -> bool:
     """True when that Claude Code process was started with the Sidekick channel enabled.
     Claude Code starts every configured MCP server in every session, but only sessions that

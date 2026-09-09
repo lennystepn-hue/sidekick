@@ -107,8 +107,10 @@ class ChannelHub:
         summarizer: Summarizer,
         attention_refresh: Callable[[], None] | None = None,
         cmdline_of: Callable[[int], list[str] | None] | None = None,
+        parent_of: Callable[[int], int | None] | None = None,
     ) -> None:
         self._cmdline_of = cmdline_of
+        self._parent_of = parent_of
         self._state = state
         self._bus = bus
         self._settings = settings
@@ -186,6 +188,9 @@ class ChannelHub:
     # --- lifecycle -------------------------------------------------------
     async def connect(self, hello: dict[str, Any], send: Sender) -> Channel:
         ppid = int(hello.get("ppid") or 0)
+        pid = int(hello.get("pid") or 0)
+        if not ppid and pid and self._parent_of is not None:
+            ppid = int(self._parent_of(pid) or 0)  # older channel servers send no ppid
         cmdline = self._cmdline_of(ppid) if (ppid and self._cmdline_of is not None) else None
         from ..terminal import is_channel_session
 
