@@ -137,6 +137,17 @@ export interface ModelsState {
   stt_progress: number;
 }
 
+/**
+ * Where spoken text goes: a terminal session (chosen by clicking its row) or, with null, the active
+ * embedded session. `POST /sessions/external/{id}/activate` sets it; activating, creating, adopting or
+ * resuming an embedded session resets it to null. Every change arrives through the `state` event.
+ */
+export interface VoiceTarget {
+  kind: "terminal";
+  session_id: string;
+  cwd: string;
+}
+
 export interface AppState {
   presence: Presence;
   presence_manual: boolean;
@@ -155,6 +166,8 @@ export interface AppState {
   models: ModelsState;
   /** Number of external (hook-driven) terminal sessions the sidecar knows about. */
   external_sessions: number;
+  /** Older sidecars omit it; a missing target means the active embedded session (read it with `?? null`). */
+  voice_target: VoiceTarget | null;
 }
 
 /** Timestamps from the sidecar: ISO strings from the database, unix seconds (float) from live objects. */
@@ -358,6 +371,12 @@ export interface AdoptOptions {
   cwd?: string;
   /** Defaults to "Terminal: <folder>". */
   title?: string;
+}
+
+/** `POST /sessions/external/{id}/activate`: the terminal session is now the voice target. */
+export interface VoiceTargetResponse {
+  ok: boolean;
+  voice_target: VoiceTarget | null;
 }
 
 /** `POST /sessions/external/{id}/defer` */

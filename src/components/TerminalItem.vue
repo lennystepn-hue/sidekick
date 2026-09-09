@@ -1,19 +1,20 @@
 <script setup lang="ts">
 /**
  * One terminal (hook-driven) session in the sidebar's "Terminal" group: folder, path, a status
- * light, and the two things you can do with it from here: take it over, or ask it to wait.
+ * light. The row itself is a button: it makes the terminal the voice target, so spoken text goes
+ * there instead of into the embedded session. What else you can do sits below (TerminalActions.vue).
  */
 import { computed, ref } from "vue";
 import { isSnoozed, isWaiting, type ExternalSession } from "../api/types";
 import { useAppStore } from "../stores/app";
 import { basename, fmtRelative, shortPath, truncate } from "../utils/format";
-import SnoozeNote from "./SnoozeNote.vue";
+import TerminalActions from "./TerminalActions.vue";
 
 const props = defineProps<{ session: ExternalSession; now: number }>();
 const app = useAppStore();
 
-type Action = "adopt" | "defer" | "wake";
-const busy = ref<Action | null>(null);
+/** Name of the running action ("voice" here, "adopt" etc. below); shared so the row dims once. */
+const busy = ref<string | null>(null);
 
 const name = computed(() => basename(props.session.cwd) || props.session.session_id);
 const ended = computed(() => props.session.active === false || props.session.last_event === "SessionEnd");
@@ -25,6 +26,8 @@ const adopted = computed(() => {
 const waiting = computed(() => !ended.value && !adopted.value && isWaiting(props.session.attention));
 const snoozed = computed(() => waiting.value && isSnoozed(props.session.snoozed_until, props.now));
 const prompt = computed(() => (props.session.last_prompt ?? "").trim());
+/** This terminal has the voice: highlighted like the active session row, with a "Stimme" chip. */
+const voice = computed(() => app.voiceTarget?.session_id === props.session.session_id);
 /* What the light says: attention beats everything, then running, then ended. */
 const tone = computed<"waiting" | "snoozed" | "active" | "ended">(() => {
   if (ended.value) return "ended";
@@ -53,76 +56,65 @@ const hover = computed(() =>
     props.session.cwd,
     statusText.value,
     channel.value ? "Kanal verbunden: Stimme rein, Freigaben raus" : "",
+    voice.value ? "Gesprochenes geht in dieses Terminal" : ended.value ? "" : "Anklicken: Gesprochenes geht in dieses Terminal",
     prompt.value ? `„${truncate(prompt.value, 200)}“` : "",
   ]
     .filter(Boolean)
     .join("\n"),
 );
 
-async function act(kind: Action, fn: () => Promise<unknown>): Promise<void> {
-  if (busy.value) return;
-  busy.value = kind;
+/** The row: Enter, Space or a click sends the voice here; an ended terminal cannot take it. */
+async function select(): Promise<void> {
+  if (ended.value || voice.value || busy.value) return;
+  busy.value = "voice";
   try {
-    await fn();
+    await app.activateTerminal(props.session.session_id);
   } finally {
     busy.value = null;
   }
 }
-const adopt = () => act("adopt", () => app.adoptExternal(props.session.session_id));
-const defer = () => act("defer", () => app.deferExternal(props.session.session_id));
-const wake = () => act("wake", () => app.wakeExternal(props.session.session_id));
-function open(): void {
-  if (adopted.value) void app.activateSession(adopted.value.id);
+function onKey(e: KeyboardEvent): void {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    void select();
+  }
 }
 </script>
 
 <template>
-  <li class="item" :class="[tone, { adopted: !!adopted, busy: busy !== null }]" :title="hover">
-    <span class="state" :class="tone" aria-hidden="true"></span>
-    <div class="text">
-      <div class="line">
-        <span class="title ellipsis">{{ name }}</span>
-        <span v-if="channel" class="chip ok kanal" title="Sidekick-Kanal verbunden">Kanal</span>
-        <span class="sr-only">, {{ statusText }}{{ channel ? ", Kanal verbunden" : "" }}</span>
-        <span class="when muted">{{ when }}</span>
-      </div>
-      <div class="dir mono muted ellipsis">{{ shortPath(session.cwd, 38) }}</div>
-      <p v-if="waiting && prompt" class="prompt ellipsis">„{{ prompt }}“</p>
-      <SnoozeNote v-if="snoozed && session.snoozed_until" :until="session.snoozed_until" :busy="busy !== null" @wake="wake" />
-      <div class="actions">
-        <button
-          v-if="adopted"
-          class="link adopted-link"
-          type="button"
-          :title="`Weiter in „${adopted.title || name}“`"
-          @click="open"
-        >
-          übernommen →
-        </button>
-        <template v-else>
-          <button
-            class="btn btn-sm"
-            type="button"
-            :disabled="busy !== null"
-            title="Als Sidekick-Session weiterführen, mit der bisherigen Unterhaltung"
-            @click="adopt"
-          >
-            <span v-if="busy === 'adopt'" class="spin" aria-hidden="true"></span>
-            {{ busy === "adopt" ? "Übernehme…" : "Übernehmen" }}
-          </button>
-          <button
-            v-if="waiting && !snoozed"
-            class="btn btn-sm btn-ghost"
-            type="button"
-            :disabled="busy !== null"
-            title="Erinnert in ein paar Minuten wieder"
-            @click="defer"
-          >
-            {{ busy === "defer" ? "Später…" : "Später" }}
-          </button>
-        </template>
+  <li class="item" :class="[tone, { voice, adopted: !!adopted, busy: busy !== null }]">
+    <div
+      class="main"
+      role="button"
+      tabindex="0"
+      :aria-current="voice ? 'true' : undefined"
+      :aria-disabled="ended ? 'true' : undefined"
+      :title="hover"
+      @click="select"
+      @keydown="onKey"
+    >
+      <span class="state" :class="tone" aria-hidden="true"></span>
+      <div class="text">
+        <div class="line">
+          <span class="title ellipsis">{{ name }}</span>
+          <span v-if="voice" class="chip accent small" title="Stimmziel: Gesprochenes geht in dieses Terminal">
+            <svg class="mic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+              <rect x="5.5" y="1.5" width="5" height="8" rx="2.5" />
+              <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" />
+            </svg>
+            Stimme
+          </span>
+          <span v-if="channel" class="chip ok small" title="Sidekick-Kanal verbunden">Kanal</span>
+          <span class="sr-only">, {{ statusText }}{{ channel ? ", Kanal verbunden" : "" }}{{ voice ? ", Stimmziel" : "" }}</span>
+        </div>
+        <div class="line sub muted">
+          <span class="dir mono ellipsis">{{ shortPath(session.cwd, 38) }}</span>
+          <span class="when">{{ when }}</span>
+        </div>
+        <p v-if="waiting && prompt" class="prompt ellipsis">„{{ prompt }}“</p>
       </div>
     </div>
+    <TerminalActions v-model:busy="busy" :session="session" :adopted="adopted" :waiting="waiting" :snoozed="snoozed" :voice="voice" />
   </li>
 </template>
 
@@ -130,9 +122,7 @@ function open(): void {
 .item {
   position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 7px 8px 8px 10px;
+  flex-direction: column;
   border-radius: var(--r-ctl);
   min-width: 0;
   transition: background-color var(--dur-fast) var(--ease-out);
@@ -141,8 +131,34 @@ function open(): void {
 .item:focus-within {
   background: var(--panel-2);
 }
+/* The voice target wears the same highlight as the active session row (`.item.active` in SessionItem.vue);
+ * the class is "voice" because "active" is already the tone of a running terminal. */
+.item.voice {
+  background: var(--panel-2);
+}
+.item.voice .title {
+  color: var(--text);
+  font-weight: 600;
+}
 .item.busy {
   opacity: 0.75;
+}
+/* The clickable part: light, title, path, prompt. The buttons below are siblings, not children. */
+.main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px 2px 10px;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: var(--r-ctl);
+}
+.main[aria-disabled="true"] {
+  cursor: default;
+}
+.main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 /* The status light, same language as the session rows: colour and (only when waiting) motion. */
 .state {
@@ -190,60 +206,33 @@ function open(): void {
   font-weight: 500;
   line-height: 19px;
 }
-.when {
-  white-space: nowrap;
-  flex-shrink: 0;
-  font-size: var(--fs-xs);
-}
-/* The channel chip sits in the title line, a size smaller than the panel chips. */
-.kanal {
+/* Chips in the title line are a size smaller than the panel chips. */
+.small {
   height: 17px;
   padding: 0 6px;
   font-size: 11px;
   flex-shrink: 0;
 }
-.dir {
-  font-size: 11.5px;
+.mic {
+  width: 11px;
+  height: 11px;
+}
+.sub {
+  font-size: var(--fs-xs);
   line-height: 16px;
+}
+.dir {
+  flex: 1;
+  font-size: 11.5px;
+}
+.when {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .prompt {
   margin: 1px 0 0;
   font-size: var(--fs-xs);
   line-height: 16px;
   color: var(--text-2);
-}
-.actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-.adopted-link {
-  color: var(--ok);
-  font-weight: 500;
-  text-decoration: none;
-}
-.adopted-link:hover {
-  color: var(--text);
-  text-decoration: underline;
-}
-/* Busy: a small arc that turns; under reduced motion it only pulses (opacity, since --m is 0). */
-.spin {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1.5px solid var(--accent-edge);
-  border-top-color: var(--accent);
-  animation: spin 900ms linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(calc(360deg * var(--m)));
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .spin {
-    animation: pulse 1.6s ease-in-out infinite;
-  }
 }
 </style>
