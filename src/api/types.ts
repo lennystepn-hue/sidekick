@@ -200,7 +200,8 @@ export interface Message {
 // ---------- Transcripts / btw ----------
 
 export type TranscriptStatus = "reviewing" | "sent" | "cancelled" | "failed";
-export type TranscriptTarget = "embedded" | "clipboard" | "answer" | "btw";
+/** "channel": delivered into a terminal session through the Sidekick channel (no clipboard, no SendInput). */
+export type TranscriptTarget = "embedded" | "clipboard" | "answer" | "btw" | "channel";
 export type TranscriptMode = "main" | "btw";
 
 export interface Transcript {
@@ -262,7 +263,18 @@ export interface PermissionRequest {
   ts: Timestamp;
   /** Unix seconds until which the request is deferred ("Später"); null (or absent on older sidecars) = not snoozed. */
   snoozed_until: number | null;
+  /**
+   * "channel": relayed from a terminal session through the Sidekick channel. Such requests carry
+   * `session_id: "channel:<channelId>"`, `input: {preview}` and only know allow/deny (plus defer/wake).
+   */
+  source?: "channel";
 }
+
+/** A relayed permission prompt of a terminal session (see `source`). */
+export const isRelay = (p: Pick<PermissionRequest, "source">): boolean => p.source === "channel";
+/** The channel id behind a relay's `session_id` ("channel:<id>"), or null for embedded requests. */
+export const relayChannelId = (p: Pick<PermissionRequest, "session_id" | "source">): string | null =>
+  isRelay(p) && p.session_id.startsWith("channel:") ? p.session_id.slice("channel:".length) : null;
 
 export interface PermissionResolution {
   decision: PermissionDecision;
@@ -333,6 +345,8 @@ export interface ExternalSession {
   snoozed_until: number | null;
   /** The last prompt Sidekick spoke for this session; "" if none yet. */
   last_prompt: string;
+  /** A Sidekick channel server of a session in this folder is connected (voice in, permissions out). */
+  channel?: boolean;
 }
 
 export const isWaiting = (a: Attention | boolean | undefined): boolean => a === true || a === "waiting_input";
@@ -351,6 +365,57 @@ export interface DeferResponse {
   ok: boolean;
   /** Unix seconds; the prompt stays quiet until then. */
   until: number;
+}
+
+// ---------- Sidekick channel / terminal launcher ----------
+
+/** One connected channel server (a terminal session started with `--dangerously-load-development-channels server:sidekick`). */
+export interface Channel {
+  id: string;
+  cwd: string;
+  pid: number;
+  name: string;
+  version: string;
+  connected_at: Timestamp;
+}
+
+/** `GET /channel/status`; install/uninstall answer with the same object. */
+export interface ChannelStatus {
+  /** The `sidekick` MCP server is registered in user scope. */
+  installed: boolean;
+  /** Path of the bundled channel script and whether it exists on disk. */
+  script: string;
+  script_found: boolean;
+  /** Resolved executables; null when not found. */
+  node: string | null;
+  claude: string | null;
+  /** Tail of the `claude mcp get sidekick` output (debugging). */
+  output: string;
+  /** The claude command line for starting a terminal session by hand. */
+  launch_hint: string;
+  connections: Channel[];
+  /** Open relay requests (`source: "channel"`). */
+  pending: PermissionRequest[];
+}
+
+/** Relays only know allow/deny; defer and wake work like on embedded requests. */
+export type RelayBehavior = "allow" | "deny" | "defer" | "wake";
+
+/** Claude Code's `--permission-mode`; unset = whatever the terminal session would use anyway. */
+export type LaunchPermissionMode = ClaudeSettings["permission_mode"];
+
+/** `POST /terminal/launch` */
+export interface LaunchOptions {
+  cwd: string;
+  remote_control: boolean;
+  channel: boolean;
+  name?: string;
+  permission_mode?: LaunchPermissionMode;
+}
+export interface LaunchResponse {
+  ok: boolean;
+  /** The Windows Terminal command line that was started. */
+  command: string[];
 }
 
 export type HookScope = "project" | "local" | "user";
@@ -506,7 +571,8 @@ export interface AssistantDelta {
 }
 export interface PermissionResolved {
   id: string;
-  decision: PermissionDecision;
+  /** "dropped": a relay went away because its channel disconnected (the terminal answered itself). */
+  decision: PermissionDecision | "dropped";
 }
 /** A pending request was deferred; it stays in the list, quiet until `until` (unix seconds). */
 export interface PermissionDeferred {
@@ -541,6 +607,17 @@ export interface IdeaStateEvent {
 export interface MaterializeProgress extends MaterializeJob {
   session_id: string;
 }
+/** Text pushed into a terminal session through its channel (voice transcripts, `POST /channel/push`). */
+export interface ChannelPush {
+  channel_id: string;
+  content: string;
+  meta: Record<string, string>;
+}
+/** Claude called the channel's `reply` tool; the sidecar speaks it (kind `channel`). */
+export interface ChannelReply {
+  channel_id: string;
+  text: string;
+}
 
 interface WsBase<T extends string, D> {
   type: T;
@@ -565,6 +642,10 @@ export type WsEvent =
   | WsBase<"error", ErrorEvent>
   | WsBase<"idea_state", IdeaStateEvent>
   | WsBase<"materialize_progress", MaterializeProgress>
+  | WsBase<"channel_connected", Channel>
+  | WsBase<"channel_disconnected", Channel>
+  | WsBase<"channel_push", ChannelPush>
+  | WsBase<"channel_reply", ChannelReply>
   /** Not in the contract table, but the sidecar broadcasts the full settings after every PUT /settings. */
   | WsBase<"settings", Settings>;
 

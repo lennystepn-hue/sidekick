@@ -82,6 +82,7 @@ export const TRANSCRIPT_TARGET_LABEL: Record<TranscriptTarget, string> = {
   clipboard: "Zwischenablage",
   answer: "Antwort",
   btw: "btw",
+  channel: "Kanal",
 };
 
 export function truncate(s: string, max: number): string {

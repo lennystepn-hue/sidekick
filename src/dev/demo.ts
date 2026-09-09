@@ -9,6 +9,8 @@ import {
   type AppState,
   type AudioDevice,
   type BtwExchange,
+  type Channel,
+  type ChannelStatus,
   type ExternalSession,
   type GestureLogEntry,
   type IdeaState,
@@ -456,6 +458,7 @@ const externalSessions: ExternalSession[] = [
     adopted_by: null,
     snoozed_until: null,
     last_prompt: `api-gateway: Claude möchte einen Befehl ausführen: ${TERM_COMMAND}. Erlauben?`,
+    channel: true,
   },
   {
     session_id: "ext_2",
@@ -468,6 +471,36 @@ const externalSessions: ExternalSession[] = [
     adopted_by: null,
     snoozed_until: null,
     last_prompt: "",
+  },
+];
+
+/** The Sidekick channel: set up, one channel server connected for the waiting terminal, one relayed prompt. */
+const CHANNEL_ID = "ch_demo_01";
+const channels: Channel[] = [{ id: CHANNEL_ID, cwd: TERM_CWD, pid: 24816, name: "sidekick", version: "0.1.0", connected_at: iso(400) }];
+const channelSetup: Omit<ChannelStatus, "connections" | "pending"> = {
+  installed: true,
+  script: `${CWD}\\channels\\sidekick\\sidekick-channel.mjs`,
+  script_found: true,
+  node: "C:\\Program Files\\nodejs\\node.exe",
+  claude: "C:\\Users\\dev\\AppData\\Roaming\\npm\\claude.cmd",
+  output: `sidekick:\n  Scope: User config\n  Status: ✓ Connected\n  Type: stdio\n  Command: C:\\Program Files\\nodejs\\node.exe\n  Args: ${CWD}\\channels\\sidekick\\sidekick-channel.mjs`,
+  launch_hint: "claude --remote-control --dangerously-load-development-channels server:sidekick",
+};
+const relays: PermissionRequest[] = [
+  {
+    id: "relay_1",
+    session_id: `channel:${CHANNEL_ID}`,
+    source: "channel",
+    kind: "permission",
+    tool_name: "Bash",
+    input: { preview: '{"command": "git push origin main"}' },
+    title: "Bash",
+    description: "Run shell command",
+    suggestions: [],
+    questions: null,
+    tool_use_id: "toolu_relay_1",
+    ts: Date.now() / 1000 - 30,
+    snoozed_until: null,
   },
 ];
 
@@ -486,6 +519,7 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
   app.demo = true;
   let current: Settings = settings;
   let pendingIds = new Set(pending.map((p) => p.id));
+  const relayIds = new Set(relays.map((r) => r.id));
 
   const emit = <T extends WsEvent["type"]>(type: T, data: Extract<WsEvent, { type: T }>["data"]): void =>
     app.handleEvent({ type, ts: Date.now() / 1000, data } as WsEvent);
@@ -666,6 +700,67 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     return clone(s);
   }
 
+  // ----- the Sidekick channel and the terminal launcher -----
+  const channelStatus = (): ChannelStatus =>
+    clone({ ...channelSetup, connections: channels, pending: relays.filter((r) => relayIds.has(r.id)) });
+  /**
+   * Windows Terminal "opens" a second later: the hooks announce the session, then (with the channel)
+   * its channel server connects, and a little later Claude asks for something through it.
+   */
+  function launchTerminal(cwd: string, withChannel: boolean): void {
+    const session_id = `ext_${Date.now().toString(36)}`;
+    const e: ExternalSession = {
+      session_id,
+      cwd,
+      transcript_path: `C:\\Users\\dev\\.claude\\projects\\${basename(cwd)}\\${session_id}.jsonl`,
+      last_event: "SessionStart",
+      last_ts: Date.now() / 1000,
+      attention: false,
+      active: true,
+      adopted_by: null,
+      snoozed_until: null,
+      last_prompt: "",
+      channel: false,
+    };
+    void (async () => {
+      await sleep(1000);
+      externalSessions.unshift(e);
+      emit("hook_event", { event: "SessionStart", session_id, cwd, summary: "" });
+      if (!withChannel) {
+        pushState();
+        return;
+      }
+      const c: Channel = { id: `ch_${session_id}`, cwd, pid: 30_000 + Math.floor(Math.random() * 9999), name: "sidekick", version: "0.1.0", connected_at: new Date().toISOString() };
+      channels.push(c);
+      e.channel = true;
+      emit("channel_connected", clone(c));
+      pushState();
+      await sleep(4000);
+      if (!externalSessions.includes(e)) return;
+      const r: PermissionRequest = {
+        id: `relay_${session_id}`,
+        session_id: `channel:${c.id}`,
+        source: "channel",
+        kind: "permission",
+        tool_name: "Bash",
+        input: { preview: '{"command": "pnpm test"}' },
+        title: "Bash",
+        description: "Run shell command",
+        suggestions: [],
+        questions: null,
+        tool_use_id: `toolu_${session_id}`,
+        ts: Date.now() / 1000,
+        snoozed_until: null,
+      };
+      relays.push(r);
+      relayIds.add(r.id);
+      Object.assign(e, { attention: true, last_event: "PermissionRequest", last_ts: Date.now() / 1000, last_prompt: `${basename(cwd)}: Claude möchte einen Befehl ausführen: pnpm test. Erlauben?` });
+      emit("permission_request", clone(r));
+      emit("hook_event", { event: "PermissionRequest", session_id, cwd, summary: e.last_prompt });
+      pushState();
+    })();
+  }
+
   configureTransport((method: HttpMethod, fullPath: string, body?: unknown) => {
     const path = fullPath.split("?")[0] ?? fullPath;
     const b = (body ?? {}) as Record<string, unknown>;
@@ -700,6 +795,8 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
           return Promise.resolve([...gestureLog].reverse());
         case "/bluetooth/health":
           return Promise.resolve({ ok: false, adapter_name: state.bluetooth_adapter.name, problem_code: 10, problem_description: "STATUS_DEVICE_POWER_FAILURE", instance_id: "USB\\VID_8087&PID_0029" });
+        case "/channel/status":
+          return Promise.resolve(channelStatus());
         case "/hooks/status":
           return Promise.resolve({ installed: true, file: `${CWD}\\.claude\\settings.json`, events: ["Stop", "Notification", "PermissionRequest", "UserPromptSubmit", "SessionStart", "SessionEnd"] });
         case "/projects/suggest": {
@@ -764,6 +861,61 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
       e.snoozed_until = null;
       pushState();
       return sleep(80).then(() => ({ ok: true }));
+    }
+
+    // ----- Sidekick channel: setup, relayed permissions, the terminal launcher -----
+    if (method === "POST" && (path === "/channel/install" || path === "/channel/uninstall")) {
+      return sleep(700).then(() => {
+        channelSetup.installed = path === "/channel/install";
+        return channelStatus();
+      });
+    }
+    const relay = path.match(/^\/channel\/permission\/(.+)$/);
+    if (method === "POST" && relay) {
+      const id = decodeURIComponent(relay[1]!);
+      const req = relays.find((r) => r.id === id);
+      if (!req || !relayIds.has(id)) return Promise.reject(new ApiError("Anfrage nicht gefunden", 404, path));
+      const behavior = String(b.behavior);
+      if (behavior === "defer") {
+        const until = snoozeUntil();
+        req.snoozed_until = until;
+        emit("permission_deferred", { id, session_id: req.session_id, until });
+        scheduleWake(until, () => {
+          if (req.snoozed_until !== until || !relayIds.has(id)) return;
+          req.snoozed_until = null;
+          emit("permission_woken", { id, session_id: req.session_id });
+        });
+        return sleep(120).then(() => ({ ok: true, until }));
+      }
+      if (behavior === "wake") {
+        req.snoozed_until = null;
+        emit("permission_woken", { id, session_id: req.session_id });
+        return sleep(80).then(() => ({ ok: true }));
+      }
+      relayIds.delete(id);
+      emit("permission_resolved", { id, decision: behavior === "allow" ? "allow" : "deny" });
+      return sleep(100).then(() => ({ ok: true }));
+    }
+    if (method === "POST" && path === "/terminal/launch") {
+      const cwd = String(b.cwd ?? "").trim();
+      if (!/^[A-Za-z]:[\\/]/.test(cwd)) return Promise.reject(new ApiError(`Ordner nicht gefunden: ${cwd || "(leer)"}`, 422, path));
+      if (b.channel === true && !channelSetup.installed) {
+        return Promise.reject(new ApiError("Der Sidekick-Kanal ist nicht eingerichtet. Einstellungen → Hooks → Sidekick-Kanal → Einrichten.", 409, path));
+      }
+      const name = typeof b.name === "string" && b.name.trim() ? b.name.trim() : basename(cwd);
+      const command = [
+        "wt",
+        "-d",
+        cwd,
+        "claude",
+        ...(b.remote_control ? ["--remote-control", name] : []),
+        ...(b.channel ? ["--dangerously-load-development-channels", "server:sidekick"] : []),
+        ...(typeof b.permission_mode === "string" ? ["--permission-mode", b.permission_mode] : []),
+      ];
+      return sleep(400).then(() => {
+        launchTerminal(cwd, b.channel === true);
+        return { ok: true, command };
+      });
     }
 
     // ----- multi-session routes -----

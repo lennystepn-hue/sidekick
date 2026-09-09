@@ -4,6 +4,7 @@ import type { HookScope, HooksStatus, Settings } from "../../api/types";
 import { useAppStore } from "../../stores/app";
 import { pickDirectory } from "../../tauri";
 import { strFrom } from "../../utils/form";
+import ChannelSetup from "./ChannelSetup.vue";
 import SettingRow from "./SettingRow.vue";
 
 const props = defineProps<{ settings: Settings }>();
@@ -115,6 +116,11 @@ async function copy(): Promise<void> {
     </div>
     <pre class="code snippet">{{ snippet }}</pre>
   </div>
+
+  <!-- The two-way link for terminal sessions; the launcher in the sidebar needs it set up once. -->
+  <div class="channel">
+    <ChannelSetup />
+  </div>
 </template>
 
 <style scoped>
@@ -145,5 +151,10 @@ async function copy(): Promise<void> {
 .snippet {
   max-height: 300px;
   font-size: 12px;
+}
+.channel {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
 }
 </style>
