@@ -490,3 +490,21 @@ def test_terminal_voice_target(tmp_path):
         assert services.clipboard_get() == "ohne kanal"
         assert c.post(f"/sessions/{created['id']}/activate").status_code == 200
         assert c.get("/state").json()["voice_target"] is None
+
+
+def test_voice_target_resets_when_the_terminal_ends(tmp_path):
+    services, spoken = _services(tmp_path)
+    with TestClient(create_app(services)) as c:
+        c.post("/hook/SessionStart", json={"session_id": "t-end", "cwd": str(tmp_path)})
+        for _ in range(50):
+            if c.get("/sessions/external").json():
+                break
+            time.sleep(0.01)
+        assert c.post("/sessions/external/t-end/activate").status_code == 200
+        assert c.get("/state").json()["voice_target"]["session_id"] == "t-end"
+        c.post("/hook/SessionEnd", json={"session_id": "t-end"})
+        for _ in range(100):
+            if c.get("/state").json()["voice_target"] is None:
+                break
+            time.sleep(0.01)
+        assert c.get("/state").json()["voice_target"] is None
