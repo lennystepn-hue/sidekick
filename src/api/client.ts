@@ -9,6 +9,7 @@ import type {
   BluetoothHealth,
   BrainstormInfo,
   BtwExchange,
+  ChannelStatus,
   DeferResponse,
   ExternalSession,
   GestureLogEntry,
@@ -16,12 +17,15 @@ import type {
   HealthResponse,
   HooksStatus,
   HookScope,
+  LaunchOptions,
+  LaunchResponse,
   MaterializeOptions,
   Message,
   OkMessage,
   PermissionRequest,
   PermissionResolution,
   ProjectSuggestion,
+  RelayBehavior,
   SecretName,
   SecretsStatus,
   Session,
@@ -218,6 +222,24 @@ export const api = {
     request<{ ok: boolean; file: string }>("POST", "/hooks/install", { path, scope }),
   hooksUninstall: (path: string, scope: HookScope) =>
     request<{ ok: boolean; file: string }>("POST", "/hooks/uninstall", { path, scope }),
+
+  // Sidekick channel (Claude Code channels preview) and the terminal launcher
+  channelStatus: () => request<ChannelStatus>("GET", "/channel/status"),
+  /** 500 with a German `detail` when Node, Claude Code or the script is missing. */
+  channelInstall: () => request<ChannelStatus>("POST", "/channel/install"),
+  channelUninstall: () => request<ChannelStatus>("POST", "/channel/uninstall"),
+  /** `defer` answers with `until` (unix seconds); the `permission_deferred` event carries it too. */
+  channelPermission: (id: string, behavior: RelayBehavior) =>
+    request<{ ok: boolean; until?: number | null }>("POST", `/channel/permission/${encodeURIComponent(id)}`, { behavior }),
+  /** 409 when the channel is requested but not installed, 422 for a bad folder. Empty names and an unset permission mode are not sent. */
+  terminalLaunch: (o: LaunchOptions) =>
+    request<LaunchResponse>("POST", "/terminal/launch", {
+      cwd: o.cwd,
+      remote_control: o.remote_control,
+      channel: o.channel,
+      ...(o.name?.trim() ? { name: o.name.trim() } : {}),
+      ...(o.permission_mode ? { permission_mode: o.permission_mode } : {}),
+    }),
 
   // gestures / lifecycle
   gesturesLog: (limit = 50) => request<GestureLogEntry[]>("GET", `/gestures/log${q({ limit })}`),

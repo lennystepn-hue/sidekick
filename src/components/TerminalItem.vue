@@ -46,8 +46,17 @@ const statusText = computed(() => {
   }
 });
 const when = computed(() => fmtRelative(props.session.last_ts, props.now));
+/** A Sidekick channel server of this folder is connected: voice goes straight in, permissions come out. */
+const channel = computed(() => props.session.channel === true && !ended.value);
 const hover = computed(() =>
-  [props.session.cwd, statusText.value, prompt.value ? `„${truncate(prompt.value, 200)}“` : ""].filter(Boolean).join("\n"),
+  [
+    props.session.cwd,
+    statusText.value,
+    channel.value ? "Kanal verbunden: Stimme rein, Freigaben raus" : "",
+    prompt.value ? `„${truncate(prompt.value, 200)}“` : "",
+  ]
+    .filter(Boolean)
+    .join("\n"),
 );
 
 async function act(kind: Action, fn: () => Promise<unknown>): Promise<void> {
@@ -73,7 +82,8 @@ function open(): void {
     <div class="text">
       <div class="line">
         <span class="title ellipsis">{{ name }}</span>
-        <span class="sr-only">, {{ statusText }}</span>
+        <span v-if="channel" class="chip ok kanal" title="Sidekick-Kanal verbunden">Kanal</span>
+        <span class="sr-only">, {{ statusText }}{{ channel ? ", Kanal verbunden" : "" }}</span>
         <span class="when muted">{{ when }}</span>
       </div>
       <div class="dir mono muted ellipsis">{{ shortPath(session.cwd, 38) }}</div>
@@ -184,6 +194,13 @@ function open(): void {
   white-space: nowrap;
   flex-shrink: 0;
   font-size: var(--fs-xs);
+}
+/* The channel chip sits in the title line, a size smaller than the panel chips. */
+.kanal {
+  height: 17px;
+  padding: 0 6px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 .dir {
   font-size: 11.5px;
