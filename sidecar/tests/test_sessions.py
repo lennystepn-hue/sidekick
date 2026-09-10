@@ -19,6 +19,7 @@ class FakeClient:
         self.options = options
         self.queue: asyncio.Queue = asyncio.Queue()
         self.queries: list[str] = []
+        self.models: list = []
         self.disconnected = False
         FakeClient.instances.append(self)
 
@@ -33,6 +34,9 @@ class FakeClient:
 
     async def interrupt(self):
         pass
+
+    async def set_model(self, model=None):
+        self.models.append(model)
 
     async def receive_messages(self):
         while True:

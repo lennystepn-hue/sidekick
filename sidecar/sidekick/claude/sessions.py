@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 DoneHook = Callable[[str, EmbeddedSession], Awaitable[None] | None]
 NeedsInputHook = Callable[[PendingPermission, EmbeddedSession], Awaitable[None] | None]
+LimitHook = Callable[[dict[str, Any], EmbeddedSession], Awaitable[None] | None]
 
 
 class SessionManager:
@@ -36,6 +37,7 @@ class SessionManager:
         db: Database,
         on_done: DoneHook | None = None,
         on_needs_input: NeedsInputHook | None = None,
+        on_limit: LimitHook | None = None,
         attention_refresh: Callable[[], None] | None = None,
         client_factory: Callable[[Any], Any] | None = None,
         scratch_dir: Path | None = None,
@@ -46,6 +48,7 @@ class SessionManager:
         self._db = db
         self._on_done = on_done
         self._on_needs_input = on_needs_input
+        self._on_limit = on_limit
         self._attention_refresh = attention_refresh
         self._client_factory = client_factory
         self._scratch_dir = scratch_dir
@@ -201,6 +204,12 @@ class SessionManager:
                 if asyncio.iscoroutine(result):
                     await result
 
+        async def on_limit(info: dict[str, Any]) -> None:
+            if self._on_limit is not None:
+                result = self._on_limit(info, holder["s"])
+                if asyncio.iscoroutine(result):
+                    await result
+
         session = EmbeddedSession(
             self._settings,
             self._state,
@@ -208,6 +217,7 @@ class SessionManager:
             self._db,
             on_done,
             on_needs_input,
+            on_limit,
             client_factory=self._client_factory,
             attention_refresh=self._attention_refresh,
             notify=self._on_change,
@@ -293,6 +303,30 @@ class SessionManager:
             self.active_id = session_id
             self.publish()
             return session
+
+    async def set_model(self, session_id: str, model: str) -> dict[str, Any] | None:
+        """Switch one session's model (live when it runs, else for the next resume)."""
+        live = self.live.get(session_id)
+        if live is not None:
+            await live.set_model(model)
+        else:
+            if self._db.get_session(session_id) is None:
+                return None
+            self._db.update_session(session_id, model=(model or "").strip())
+        self.publish()
+        return self.summary(session_id)
+
+    async def set_model_all(self, model: str) -> list[str]:
+        """Switch every running session (used when the usage limit rejects a turn)."""
+        switched: list[str] = []
+        for session in list(self.live.values()):
+            if session.running and (session.info.model if session.info else "") != model:
+                try:
+                    await session.set_model(model)
+                    switched.append(session.session_id or "")
+                except Exception:  # noqa: BLE001
+                    log.exception("switching %s to %s failed", session.session_id, model)
+        return switched
 
     def set_project_path(self, session_id: str, path: str | None) -> None:
         live = self.live.get(session_id)

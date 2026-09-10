@@ -93,6 +93,12 @@ class ClaudeSettings(BaseModel):
     last_cwd: str = ""
     # "Später": a deferred permission stays silent for this long, then asks again.
     defer_minutes: int = 10
+    # When the usage limit rejects a turn, switch running sessions to this model ("" = off).
+    limit_fallback_model: str = "claude-sonnet-5"
+    # Offered in the model picker; the first entry means "as configured in Claude Code".
+    models: list[str] = Field(
+        default_factory=lambda: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+    )
 
 
 class BrainstormSettings(BaseModel):

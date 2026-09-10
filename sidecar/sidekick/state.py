@@ -73,6 +73,9 @@ class AppStateData:
     # Where spoken text goes: None = the active embedded session; else a terminal session
     # {"kind": "terminal", "session_id": ..., "cwd": ...} (its channel, or the clipboard).
     voice_target: dict[str, Any] | None = None
+    # Account-wide usage limit as Claude Code reports it: {status, resets_at, rate_limit_type,
+    # windows: {five_hour: {utilization, resets_at}, seven_day: {...}}, ts}. None until seen.
+    rate_limit: dict[str, Any] | None = None
     sessions: list[dict[str, Any]] = field(default_factory=list)
     active_session_id: str | None = None
 

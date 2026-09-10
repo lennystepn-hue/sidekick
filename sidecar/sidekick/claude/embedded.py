@@ -26,6 +26,7 @@ from .idea import IdeaState, StreamFilter, split_idea_block
 log = logging.getLogger(__name__)
 
 DoneHandler = Callable[[str], Awaitable[None] | None]
+LimitHandler = Callable[[dict[str, Any]], Awaitable[None] | None]
 SETTING_SOURCES = ["user", "project", "local"]
 TITLE_MAX = 60
 BRAINSTORM_PROMPT = "brainstorm"
@@ -112,6 +113,15 @@ def blocks_from_content(content: Any) -> list[dict[str, Any]]:
     return out
 
 
+_LIMIT_WORDS = ("usage limit", "rate limit", "nutzungslimit", "limit reached", "limit erreicht")
+
+
+def is_limit_error(text: str) -> bool:
+    """A failed turn that was really the account's usage limit."""
+    low = (text or "").lower()
+    return any(w in low for w in _LIMIT_WORDS)
+
+
 def auto_title(text: str) -> str:
     first = " ".join(text.strip().split())
     return first if len(first) <= TITLE_MAX else first[: TITLE_MAX - 1] + "…"
@@ -126,6 +136,7 @@ class EmbeddedSession:
         db: Database,
         on_done: DoneHandler | None = None,
         on_needs_input: Callable[[PendingPermission], Awaitable[None] | None] | None = None,
+        on_limit: LimitHandler | None = None,
         client_factory: Callable[[Any], Any] | None = None,
         attention_refresh: Callable[[], None] | None = None,
         notify: Callable[[EmbeddedSession], None] | None = None,
@@ -137,6 +148,7 @@ class EmbeddedSession:
         self._db = db
         self._on_done = on_done
         self._on_needs_input = on_needs_input
+        self._on_limit = on_limit
         self._client_factory = client_factory or self._default_client
         self._attention_refresh = attention_refresh
         self._notify_cb = notify
@@ -383,6 +395,18 @@ class EmbeddedSession:
             self._interrupted = True
             await self._client.interrupt()
 
+    async def set_model(self, model: str) -> None:
+        """Switch the model of this session. Empty string = whatever Claude Code defaults to.
+        Works while a session runs (verified against the CLI); stopped sessions keep it for
+        the next resume."""
+        model = (model or "").strip()
+        if self.running and hasattr(self._client, "set_model"):
+            await self._client.set_model(model or None)
+            log.info("session %s switched to model %s", self.session_id, model or "(default)")
+        if self.session_id:
+            self._db.update_session(self.session_id, model=model)
+        self._set(model=model)
+
     async def set_permission_mode(self, mode: str) -> None:
         """Switch the running session's permission mode (settings change)."""
         if self.running and hasattr(self._client, "set_permission_mode"):
@@ -588,6 +612,32 @@ class EmbeddedSession:
                 out.append({**block, "text": visible})
         return out
 
+    async def _handle_rate_limit(self, message: Any) -> None:
+        info = message.rate_limit_info
+        raw = getattr(info, "raw", None) or {}
+        windows = {
+            name: {"utilization": w.get("utilization"), "resets_at": w.get("resetsAt")}
+            for name, w in (raw.get("unifiedWindows") or {}).items()
+            if isinstance(w, dict)
+        }
+        data = {
+            "status": info.status,
+            "resets_at": info.resets_at,
+            "rate_limit_type": info.rate_limit_type,
+            "utilization": info.utilization,
+            "windows": windows,
+            "session_id": self.session_id,
+            "ts": time.time(),
+        }
+        self._state.update(rate_limit=data)
+        if self._on_limit is not None:
+            try:
+                result = self._on_limit(data)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:  # noqa: BLE001
+                log.exception("on_limit failed")
+
     def _record_sdk_id(self, sdk_id: str | None) -> None:
         if sdk_id and sdk_id != self.sdk_session_id:
             self.sdk_session_id = sdk_id
@@ -596,9 +646,19 @@ class EmbeddedSession:
             self._set(sdk_session_id=sdk_id)
 
     async def _handle(self, message: Any) -> None:
-        from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, SystemMessage, UserMessage
+        from claude_agent_sdk import (
+            AssistantMessage,
+            RateLimitEvent,
+            ResultMessage,
+            StreamEvent,
+            SystemMessage,
+            UserMessage,
+        )
 
         sid = self.session_id or ""
+        if isinstance(message, RateLimitEvent):
+            await self._handle_rate_limit(message)
+            return
         if isinstance(message, StreamEvent):
             ev = message.event or {}
             etype = ev.get("type")
@@ -668,9 +728,12 @@ class EmbeddedSession:
             final = self._last_assistant_text or (message.result or "")
             interrupted, self._interrupted = self._interrupted, False
             if message.is_error:
-                self._bus.publish(
-                    "error", {"module": "session", "message": message.result or message.subtype}
-                )
+                text = message.result or message.subtype or ""
+                self._bus.publish("error", {"module": "session", "message": text})
+                if is_limit_error(text) and self._on_limit is not None:
+                    result = self._on_limit({"status": "rejected", "reason": text, "ts": time.time()})
+                    if asyncio.iscoroutine(result):
+                        await result
                 return
             if interrupted:
                 log.info("turn interrupted; not announcing")
