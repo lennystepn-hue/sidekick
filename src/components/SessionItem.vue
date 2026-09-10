@@ -82,6 +82,7 @@ async function act(fn: () => Promise<unknown>): Promise<void> {
   }
 }
 const resume = () => act(() => app.resumeSession(props.session.id));
+const setModel = (model: string) => act(() => app.setSessionModel(props.session.id, model));
 const stop = () => act(() => app.stopSession(props.session.id));
 const remove = () => act(() => app.deleteSession(props.session.id));
 </script>
@@ -159,6 +160,7 @@ const remove = () => act(() => app.deleteSession(props.session.id));
       @resume="resume"
       @stop="stop"
       @delete="remove"
+      @model="setModel"
     />
   </li>
 </template>

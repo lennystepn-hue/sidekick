@@ -4,6 +4,7 @@ import { useAuraState } from "../composables/auraState";
 import { useAppStore } from "../stores/app";
 import { PRESENCE_LABEL } from "../utils/format";
 import Aura from "./Aura.vue";
+import LimitChip from "./LimitChip.vue";
 
 defineProps<{ panelOpen: boolean; sessionsOpen: boolean }>();
 const emit = defineEmits<{ (e: "open-settings"): void; (e: "toggle-panel"): void; (e: "toggle-sessions"): void }>();
@@ -70,6 +71,7 @@ async function toggleGlasses(): Promise<void> {
         <span class="sep">{{ glassesText }}</span>
         <span v-if="s?.battery != null" class="sep tabular">{{ s.battery }} %</span>
       </div>
+      <LimitChip />
       <span v-if="s" class="muted sep presence" :title="'Anwesenheit: ' + presenceText">{{ presenceText }}</span>
       <span
         v-if="output"

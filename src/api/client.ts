@@ -197,6 +197,12 @@ export const api = {
   sessionResume: (id: string) => request<SessionSummary>("POST", `/sessions/${encodeURIComponent(id)}/resume`),
   sessionStopById: (id: string) => request<{ ok: boolean }>("POST", `/sessions/${encodeURIComponent(id)}/stop`),
   sessionDelete: (id: string) => request<{ ok: boolean }>("DELETE", `/sessions/${encodeURIComponent(id)}`),
+  /**
+   * Switches a session's model. Empty string = whatever Claude Code defaults to. Works while the
+   * session runs; for stopped sessions the model is stored for the next resume. 404 unknown session.
+   */
+  sessionSetModel: (id: string, model: string) =>
+    request<SessionSummary>("POST", `/sessions/${encodeURIComponent(id)}/model`, { model }),
   sessionRename: (id: string, title: string) =>
     request<SessionSummary>("PATCH", `/sessions/${encodeURIComponent(id)}`, { title }),
   sessionMessagesById: (id: string, limit = 200) =>

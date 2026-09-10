@@ -148,6 +148,33 @@ export interface VoiceTarget {
   cwd: string;
 }
 
+/**
+ * Usage limit of the Claude account, as the sidecar last saw it. `status` is "allowed",
+ * "allowed_warning" or "rejected"; anything but "allowed" is worth showing.
+ */
+export type RateLimitStatus = "allowed" | "allowed_warning" | "rejected";
+
+/** One limit window ("five_hour", "seven_day", …): how full it is (0..1) and when it resets. */
+export interface RateLimitWindow {
+  utilization: number | null;
+  /** Unix seconds. */
+  resets_at: number | null;
+}
+
+export interface RateLimit {
+  status: RateLimitStatus;
+  /** Unix seconds until the limit that rejected a turn is lifted. */
+  resets_at: number | null;
+  rate_limit_type: string | null;
+  utilization: number | null;
+  /** Usually "five_hour" and "seven_day". */
+  windows: Record<string, RateLimitWindow>;
+  session_id?: string;
+  ts: Timestamp;
+  /** The status Sidekick has already spoken about; only for the sidecar's own bookkeeping. */
+  announced_status?: string;
+}
+
 export interface AppState {
   presence: Presence;
   presence_manual: boolean;
@@ -168,6 +195,8 @@ export interface AppState {
   external_sessions: number;
   /** Older sidecars omit it; a missing target means the active embedded session (read it with `?? null`). */
   voice_target: VoiceTarget | null;
+  /** Last usage-limit signal of the account; null (or absent on older sidecars) means nothing to report. */
+  rate_limit: RateLimit | null;
 }
 
 /** Timestamps from the sidecar: ISO strings from the database, unix seconds (float) from live objects. */
@@ -537,6 +566,10 @@ export interface ClaudeSettings {
   summary_model: string;
   btw_model: string;
   session_model: string;
+  /** The models the pickers offer; empty falls back to the built-in three. */
+  models: string[];
+  /** Model every running session is switched to when the usage limit rejects a turn; "" = off. */
+  limit_fallback_model: string;
   permission_mode: "auto" | "acceptEdits" | "default" | "bypassPermissions";
   cli_path: string;
   last_cwd: string;
