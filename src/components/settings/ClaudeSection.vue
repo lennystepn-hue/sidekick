@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import type { Settings } from "../../api/types";
+import { useModelChoices } from "../../composables/models";
 import { useSettingsStore } from "../../stores/settings";
-import { checked, numFrom, strFrom } from "../../utils/form";
+import { checked, listFrom, numFrom, strFrom } from "../../utils/form";
+import { modelLabel } from "../../utils/format";
 import SettingRow from "./SettingRow.vue";
 
-defineProps<{ settings: Settings }>();
+const props = defineProps<{ settings: Settings }>();
 const st = useSettingsStore();
+/** The configured models plus, so it stays visible, a fallback model that is no longer in the list. */
+const fallbackChoices = useModelChoices(() => props.settings.claude.limit_fallback_model);
 </script>
 
 <template>
@@ -67,6 +71,32 @@ const st = useSettingsStore();
       :value="settings.claude.session_model"
       @change="st.set('claude', 'session_model', strFrom($event).trim())"
     />
+  </SettingRow>
+  <SettingRow
+    label="Modelle zur Auswahl"
+    hint="Kommagetrennt. Diese Modelle stehen im Session-Menü und in der Composer-Zeile zur Wahl."
+    input-id="c-models"
+  >
+    <input
+      id="c-models"
+      class="input mono"
+      :value="(settings.claude.models ?? []).join(', ')"
+      @change="st.set('claude', 'models', listFrom($event))"
+    />
+  </SettingRow>
+  <SettingRow
+    label="Modell bei Limit"
+    hint="Wenn das Nutzungslimit zuschlägt, schaltet Sidekick laufende Sessions auf dieses Modell um und sagt Bescheid."
+    input-id="c-limit"
+  >
+    <select
+      id="c-limit"
+      class="select"
+      :value="settings.claude.limit_fallback_model"
+      @change="st.set('claude', 'limit_fallback_model', strFrom($event))"
+    >
+      <option v-for="m in fallbackChoices" :key="m" :value="m">{{ m ? modelLabel(m) : "Aus" }}</option>
+    </select>
   </SettingRow>
   <SettingRow label="CLI-Pfad" hint="Optionaler Pfad zu einer claude.exe. Leer = gebündeltes Binary des SDK." input-id="c-cli">
     <input

@@ -186,7 +186,7 @@ The glasses are a normal Bluetooth headset to Windows: A2DP for good playback, H
 | `stt` | engine (`parakeet` by default, or `faster-whisper`; Parakeet TDT 0.6B v3 int8 is about ten times faster on the CPU and downloads 670 MB on first use), Whisper model, silence and max duration, languages, hotwords (Parakeet has no hotwords, so the cleanup gets them as known terms), review delay, cleanup on/off |
 | `tts` | `elevenlabs` or `edge`, voice, summarize before speaking, `quiet_after_input_s` (after your own input, "done" is tone-only for this long; questions are always read) |
 | `gestures` | mapping of single/double/triple/hold, capture media keys |
-| `claude` | models for cleanup, summary and btw, permission mode, CLI path, `defer_minutes` for "später" |
+| `claude` | models for cleanup, summary and btw, the `models` the session pickers offer, `limit_fallback_model` (what running sessions switch to when the usage limit rejects a turn), permission mode, CLI path, `defer_minutes` for "später" |
 | `brainstorm` | partner and docs model (Opus 5), speak replies, auto-listen after a reply, thinking |
 | `projects` | base folder for created projects (`~/Projects`), git init, start session after create |
 | `delivery` | clipboard and SendInput for terminal sessions |

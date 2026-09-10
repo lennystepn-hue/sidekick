@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import type { SessionSummary } from "../api/types";
+import { useModelChoices } from "../composables/models";
+import { modelLabel } from "../utils/format";
 
 const props = defineProps<{ session: SessionSummary; title: string; anchor: HTMLElement | null }>();
 const emit = defineEmits<{
@@ -9,7 +11,10 @@ const emit = defineEmits<{
   (e: "resume"): void;
   (e: "stop"): void;
   (e: "delete"): void;
+  (e: "model", model: string): void;
 }>();
+
+const choices = useModelChoices(() => props.session.model);
 
 const root = ref<HTMLElement | null>(null);
 const confirmDelete = ref(false);
@@ -64,6 +69,25 @@ onBeforeUnmount(() => {
       <button v-if="resumable" class="mi" role="menuitem" @click="emit('resume')">Fortsetzen</button>
       <button v-if="!stopped" class="mi" role="menuitem" @click="emit('stop')">Beenden</button>
       <button class="mi danger" role="menuitem" @click="confirmDelete = true">Löschen…</button>
+
+      <!-- Works in a running session (the SDK switches live) and is remembered for the next resume. -->
+      <p id="menu-model" class="group">Modell</p>
+      <div role="group" aria-labelledby="menu-model" class="models">
+        <button
+          v-for="m in choices"
+          :key="m"
+          class="mi pick"
+          role="menuitemradio"
+          :aria-checked="m === session.model"
+          :title="m || 'Claude-Code-Standard'"
+          @click="emit('model', m)"
+        >
+          <svg class="tick" :class="{ on: m === session.model }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3.5 8.5l3 3 6-6.5" />
+          </svg>
+          <span class="ellipsis">{{ m ? modelLabel(m) : "Standard (Claude Code)" }}</span>
+        </button>
+      </div>
     </template>
   </div>
 </template>
@@ -110,6 +134,42 @@ onBeforeUnmount(() => {
 }
 .mi.danger {
   color: var(--err);
+}
+/* Section heading and the model list below the actions. */
+.group {
+  margin: 6px 0 2px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 7px;
+}
+.models {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mi.pick {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 6px;
+  min-width: 0;
+}
+.mi.pick[aria-checked="true"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tick {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.tick.on {
+  opacity: 1;
 }
 .mi.danger:hover,
 .mi.danger:focus-visible {

@@ -85,6 +85,25 @@ export const TRANSCRIPT_TARGET_LABEL: Record<TranscriptTarget, string> = {
   channel: "Kanal",
 };
 
+/**
+ * Short name of a model id for chips and menus: "claude-sonnet-5" -> "Sonnet 5",
+ * "claude-haiku-4-5" -> "Haiku 4.5", "" -> "Standard". Unknown ids lose the "claude-" prefix
+ * and get capitalised.
+ */
+export function modelLabel(model: string | null | undefined): string {
+  const id = (model ?? "").trim();
+  if (!id) return "Standard";
+  const rest = id.replace(/^claude-/, "");
+  // "sonnet-5", "haiku-4-5", "fable-5-1": a name plus version segments joined by a dot.
+  const m = /^([a-z]+)((?:-\d+)*)$/i.exec(rest);
+  if (m) {
+    const name = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1);
+    const version = m[2]!.replace(/^-/, "").replace(/-/g, ".");
+    return version ? `${name} ${version}` : name;
+  }
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
+}
+
 export function truncate(s: string, max: number): string {
   const one = s.replace(/\s+/g, " ").trim();
   return one.length > max ? one.slice(0, max - 1) + "…" : one;
