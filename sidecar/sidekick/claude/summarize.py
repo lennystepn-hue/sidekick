@@ -55,6 +55,25 @@ def spoken_reply(text: str, limit: int = 900) -> str:
     return cut.rstrip() + "…"
 
 
+MODEL_LABELS = {
+    "claude-opus-5": "Opus 5",
+    "claude-sonnet-5": "Sonnet 5",
+    "claude-haiku-4-5": "Haiku 4.5",
+    "claude-fable-5-1": "Fable 5.1",
+}
+
+
+def model_label(model: str) -> str:
+    """Spoken name of a model id ("claude-sonnet-5" -> "Sonnet 5")."""
+    model = (model or "").strip()
+    if not model:
+        return "das Standardmodell"
+    if model in MODEL_LABELS:
+        return MODEL_LABELS[model]
+    name = model.removeprefix("claude-").replace("-", " ")
+    return name[:1].upper() + name[1:]
+
+
 TOOL_VERBS = {
     "Bash": "einen Befehl ausführen",
     "PowerShell": "einen Befehl ausführen",

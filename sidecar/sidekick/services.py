@@ -360,7 +360,7 @@ def build_services(
     from .claude.hooks import HookHandler
     from .claude.materialize import Materializer
     from .claude.sessions import SessionManager
-    from .claude.summarize import Summarizer, spoken_reply
+    from .claude.summarize import Summarizer, model_label, spoken_reply
     from .claude.transcript import recent_messages
     from .claude.utility import UtilityLLM
     from .gestures.controller import GestureController
@@ -575,6 +575,44 @@ def build_services(
         summary = await summarizer.summarize(text)
         speaker.speak(_prefix(session) + summary, kind="done")
 
+    def _limit_reset_text(info: dict[str, Any]) -> str:
+        import time as _time
+
+        resets = info.get("resets_at") or (info.get("windows", {}).get("five_hour") or {}).get("resets_at")
+        if not resets:
+            return ""
+        left = int(resets) - int(_time.time())
+        if left <= 0:
+            return ""
+        stamp = _time.strftime("%H:%M", _time.localtime(int(resets)))
+        return f" Weiter geht es um {stamp} Uhr."
+
+    async def on_limit(info: dict[str, Any], session: EmbeddedSession) -> None:
+        """Claude Code reported the account's usage limit: say it once per status change,
+        and switch running sessions to the fallback model when the limit rejects turns."""
+        status = str(info.get("status") or "")
+        last = state.data.rate_limit or {}
+        if status == last.get("announced_status"):
+            return
+        cfg = settings().claude
+        if status in ("rejected", "blocked"):
+            spoken = "Nutzungslimit erreicht." + _limit_reset_text(info)
+            fallback = (cfg.limit_fallback_model or "").strip()
+            if fallback:
+                switched = await sessions.set_model_all(fallback)
+                if switched:
+                    spoken += f" Ich habe auf {model_label(fallback)} umgeschaltet, schick deine letzte Nachricht noch einmal."
+            sounds.play("error")
+            speaker.speak(_prefix(session) + spoken, kind="limit")
+        elif status in ("allowed_warning", "warning"):
+            share = info.get("utilization") or (info.get("windows", {}).get("five_hour") or {}).get(
+                "utilization"
+            )
+            percent = f" {round(float(share) * 100)} Prozent sind weg." if share else ""
+            speaker.speak(f"Nutzungslimit wird knapp.{percent}{_limit_reset_text(info)}", kind="limit")
+        merged = {**info, "announced_status": status}
+        state.update(rate_limit=merged)
+
     async def auto_listen() -> None:
         """Open the microphone again once the spoken reply has finished (round trip without a tap)."""
         await asyncio.sleep(0.5)
@@ -604,6 +642,7 @@ def build_services(
         db,
         on_done,
         on_needs_input,
+        on_limit,
         attention_refresh=hooks.refresh_state,
         # tests keep brainstorm scratch folders next to their temporary database
         scratch_dir=None if hardware else Path(str(db_path)).parent / "brainstorms",

@@ -149,6 +149,8 @@ When Claude asks for permission, "yes", "no" and "always" (in German or English)
 
 The left sidebar lists every session. Several can run at once, each with its own Claude Code process; voice and transcript always go to the **active** one, and when more than one is running the announcement names the session first. Sessions persist in SQLite with their Claude Code session id, so a stopped session resumes with its full history. The title comes from the first message (or from the idea title in a brainstorm) and can be renamed.
 
+**Model per session**: the session menu and the composer line carry a model picker (Opus 5, Sonnet 5, Haiku 4.5, or whatever Claude Code defaults to). Switching applies to the running session immediately, no restart and no lost context. When the account's usage limit rejects a turn, Sidekick says so with the reset time and switches every running session to `claude.limit_fallback_model` (Sonnet 5 by default, "" turns it off); the header shows how full the five-hour and seven-day windows are.
+
 Permission mode defaults to Claude Code's **auto** mode (Claude decides, asks only for risky actions); "accept edits", "always ask" and "never ask" are one dropdown away and apply to running sessions immediately.
 
 ### Terminal sessions
@@ -186,7 +188,7 @@ The glasses are a normal Bluetooth headset to Windows: A2DP for good playback, H
 | `stt` | engine (`parakeet` by default, or `faster-whisper`; Parakeet TDT 0.6B v3 int8 is about ten times faster on the CPU and downloads 670 MB on first use), Whisper model, silence and max duration, languages, hotwords (Parakeet has no hotwords, so the cleanup gets them as known terms), review delay, cleanup on/off |
 | `tts` | `elevenlabs` or `edge`, voice, summarize before speaking, `quiet_after_input_s` (after your own input, "done" is tone-only for this long; questions are always read) |
 | `gestures` | mapping of single/double/triple/hold, capture media keys |
-| `claude` | models for cleanup, summary and btw, permission mode, CLI path, `defer_minutes` for "später" |
+| `claude` | models for cleanup, summary and btw, `models` (the session picker's list) and `limit_fallback_model` (what running sessions switch to when the usage limit rejects a turn), permission mode, CLI path, `defer_minutes` for "später" |
 | `brainstorm` | partner and docs model (Opus 5), speak replies, auto-listen after a reply, thinking |
 | `projects` | base folder for created projects (`~/Projects`), git init, start session after create |
 | `delivery` | clipboard and SendInput for terminal sessions |

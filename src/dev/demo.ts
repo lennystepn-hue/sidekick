@@ -17,6 +17,7 @@ import {
   type MaterializeJob,
   type Message,
   type PermissionRequest,
+  type RateLimit,
   type SessionSummary,
   type Settings,
   type Transcript,
@@ -24,7 +25,7 @@ import {
 } from "../api/types";
 import type { AppStore } from "../stores/app";
 import { deepMerge, type SettingsStore } from "../stores/settings";
-import { basename } from "../utils/format";
+import { basename, modelLabel } from "../utils/format";
 
 const CWD = "C:\\Users\\dev\\Projects\\sidekick";
 const BLOG_CWD = "C:\\Users\\dev\\Projects\\blog";
@@ -100,7 +101,7 @@ const shelfIdea: IdeaState = {
 
 /** Active + running (the existing demo transcript), waiting with open requests, idle, stopped+resumable. */
 const sessions: SessionSummary[] = [
-  mkSession({ id: SESSION_ID, cwd: CWD, title: "Hook-Installer", status: "running", started_at: iso(1800), last_active: iso(5), message_count: 9 }),
+  mkSession({ id: SESSION_ID, cwd: CWD, title: "Hook-Installer", status: "running", model: "claude-sonnet-5", started_at: iso(1800), last_active: iso(5), message_count: 9 }),
   mkSession({ id: BLOG_ID, cwd: BLOG_CWD, title: "Blog-Relaunch", status: "waiting", model: "claude-sonnet-5", started_at: iso(5400), last_active: iso(130), message_count: 4 }),
   mkSession({ id: NOTES_ID, cwd: "C:\\Users\\dev\\Projects\\notizen", title: "", status: "idle", started_at: iso(2600), last_active: iso(1500), message_count: 2 }),
   mkSession({ id: LAB_ID, cwd: "C:\\Users\\dev\\Projects\\sidecar-lab", title: "Sidecar-Tests", status: "stopped", started_at: iso(100_000), last_active: iso(93_000), message_count: 3 }),
@@ -109,6 +110,24 @@ const sessions: SessionSummary[] = [
   mkSession({ id: MADE_CODE_ID, cwd: `${PROJECTS_DIR}\\regalwaechter`, title: "Regalwächter", status: "idle", started_at: iso(7100), last_active: iso(6900), message_count: 2 }),
 ];
 let activeId: string | null = SESSION_ID;
+
+const unix = (inSeconds = 0): number => Math.floor(Date.now() / 1000) + inSeconds;
+/**
+ * The account's usage limit as the sidecar reports it. The demo starts at "allowed_warning" with a
+ * nearly full five-hour window, so the header chip is visible right away.
+ */
+const rateLimit = (status: RateLimit["status"], five: number, resetsInS: number): RateLimit => ({
+  status,
+  resets_at: status === "rejected" ? unix(resetsInS) : null,
+  rate_limit_type: status === "rejected" ? "five_hour" : null,
+  utilization: five,
+  windows: {
+    five_hour: { utilization: five, resets_at: unix(resetsInS) },
+    seven_day: { utilization: 0.4, resets_at: unix(4 * 86_400) },
+  },
+  session_id: SESSION_ID,
+  ts: Date.now() / 1000,
+});
 
 const state: AppState = {
   presence: "present",
@@ -132,6 +151,7 @@ const state: AppState = {
   },
   external_sessions: 2,
   voice_target: null,
+  rate_limit: rateLimit("allowed_warning", 0.9, 42 * 60),
 };
 
 const settings: Settings = {
@@ -170,6 +190,8 @@ const settings: Settings = {
     summary_model: "claude-haiku-4-5",
     btw_model: "claude-sonnet-5",
     session_model: "",
+    models: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+    limit_fallback_model: "claude-sonnet-5",
     permission_mode: "auto",
     cli_path: "",
     last_cwd: CWD,
@@ -771,7 +793,7 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
   configureTransport((method: HttpMethod, fullPath: string, body?: unknown) => {
     const path = fullPath.split("?")[0] ?? fullPath;
     const b = (body ?? {}) as Record<string, unknown>;
-    const perSession = path.match(/^\/sessions\/([^/]+)(?:\/(messages|activate|resume|stop|send|interrupt))?$/);
+    const perSession = path.match(/^\/sessions\/([^/]+)(?:\/(messages|activate|resume|stop|send|interrupt|model))?$/);
     if (method === "GET") {
       const sm = path.match(/^\/sessions\/([^/]+)\/messages$/);
       if (sm) return Promise.resolve(clone(messagesBy[decodeURIComponent(sm[1]!)] ?? []));
@@ -981,6 +1003,12 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
           if (s.status === "running") s.status = "idle";
           pushState();
           return Promise.resolve({ ok: true });
+        // Like the sidecar: a running session switches live, a stopped one keeps it for the resume.
+        case "model": {
+          s.model = typeof b.model === "string" ? b.model.trim() : "";
+          pushState();
+          return sleep(150).then(() => clone(s));
+        }
       }
     }
 
@@ -1111,6 +1139,20 @@ export async function startDemo(app: AppStore, settingsStore: SettingsStore): Pr
     Object.assign(reviewing, { status: "sent", sent: true, target: state.voice_target ? "channel" : "embedded", review_deadline_ts: null });
     emit("transcript", { ...reviewing });
   }, Math.max(deadlineMs, 0));
+
+  // The limit tightens: a turn gets rejected, and Sidekick moves the running sessions to the fallback.
+  window.setTimeout(() => {
+    const fallback = current.claude.limit_fallback_model;
+    state.rate_limit = rateLimit("rejected", 1, 33 * 60);
+    if (fallback) for (const s of sessions) if (s.status !== "stopped") s.model = fallback;
+    pushState();
+    emit("spoken", {
+      text: fallback
+        ? `Das Nutzungslimit ist erreicht. Ich schalte die laufenden Sessions auf ${modelLabel(fallback)} um.`
+        : "Das Nutzungslimit ist erreicht.",
+      kind: "limit",
+    });
+  }, 45_000);
 
   // A gesture every now and then, so the gesture test shows movement.
   window.setInterval(() => {

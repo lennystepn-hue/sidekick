@@ -23,6 +23,7 @@ import {
   type PermissionDecision,
   type PermissionRequest,
   type PermissionResolution,
+  type RateLimit,
   type RelayBehavior,
   type SessionSummary,
   type SoundName,
@@ -141,6 +142,8 @@ export const useAppStore = defineStore("app", () => {
   );
   /** Where spoken text goes; null (or missing on older sidecars) means the active embedded session. */
   const voiceTarget = computed<VoiceTarget | null>(() => state.value?.voice_target ?? null);
+  /** Last usage-limit signal of the account; null (or missing on older sidecars) means nothing to show. */
+  const rateLimit = computed<RateLimit | null>(() => state.value?.rate_limit ?? null);
   /** A terminal row was chosen: the embedded rows drop their active highlight, the composer shows the banner. */
   const voiceGoesToTerminal = computed(() => voiceTarget.value?.kind === "terminal");
   /** The embedded session "zurück zur Session" re-activates: the active one, else any that is not stopped; null hides the link. */
@@ -670,6 +673,27 @@ export const useAppStore = defineStore("app", () => {
       applySummary(s);
       return s;
     }, "Session");
+  /**
+   * Switches a session's model ("" = Claude-Code-Standard). Shown right away; a failure puts the
+   * previous model back and toasts. The sidecar switches a running session live and remembers the
+   * model for the next resume of a stopped one.
+   */
+  async function setSessionModel(id: string, model: string): Promise<SessionSummary | undefined> {
+    const current = state.value?.sessions.find((s) => s.id === id);
+    if (current?.model === model) return undefined;
+    if (current) applySummary({ ...current, model });
+    return run(async () => {
+      try {
+        const s = await api.sessionSetModel(id, model);
+        applySummary(s);
+        return s;
+      } catch (e) {
+        const now = state.value?.sessions.find((x) => x.id === id);
+        if (current && now && now.model === model) applySummary({ ...now, model: current.model });
+        throw e;
+      }
+    }, "Modell");
+  }
   const sendToSession = (id: string, text: string) => run(() => api.sessionSendTo(id, text), "Senden");
 
   // ---------- brainstorm / projects ----------
@@ -925,6 +949,7 @@ export const useAppStore = defineStore("app", () => {
     pendingBySession,
     hasEmbeddedSession,
     voiceTarget,
+    rateLimit,
     voiceGoesToTerminal,
     voiceReturnId,
     activeIsBrainstorm,
@@ -956,6 +981,7 @@ export const useAppStore = defineStore("app", () => {
     stopSession,
     deleteSession,
     renameSession,
+    setSessionModel,
     sendToSession,
     loadBrainstorm,
     materialize,

@@ -4,6 +4,7 @@ import { useAppStore } from "../stores/app";
 import { useSettingsStore } from "../stores/settings";
 import { pickDirectory } from "../tauri";
 import { SESSION_STATUS_LABEL, shortPath } from "../utils/format";
+import ModelChip from "./ModelChip.vue";
 import VoiceTargetBar from "./VoiceTargetBar.vue";
 
 const app = useAppStore();
@@ -126,7 +127,7 @@ function onKey(e: KeyboardEvent): void {
         </span>
         <span v-else class="mono cwd ellipsis" :title="session.cwd">{{ shortPath(session.cwd, 60) }}</span>
         <span class="chip" :class="statusChip">{{ status ? SESSION_STATUS_LABEL[status] : "" }}</span>
-        <span v-if="session.model" class="muted model ellipsis" :title="session.model">{{ session.model }}</span>
+        <ModelChip :session-id="session.id" :model="session.model" />
         <span class="spacer"></span>
         <button v-if="running" class="btn btn-sm" @click="app.interrupt()">Unterbrechen</button>
         <button v-if="live" class="btn btn-sm btn-danger" @click="app.stopSession()">Session beenden</button>
@@ -233,10 +234,6 @@ function onKey(e: KeyboardEvent): void {
 .kind svg {
   width: 13px;
   height: 13px;
-}
-.model {
-  font-size: var(--fs-xs);
-  max-width: 180px;
 }
 .cwd-input {
   flex: 1 1 220px;

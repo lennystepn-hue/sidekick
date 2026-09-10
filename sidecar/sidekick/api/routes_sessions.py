@@ -36,6 +36,10 @@ class SendBody(BaseModel):
     text: str
 
 
+class ModelBody(BaseModel):
+    model: str = ""
+
+
 def _manager(services: Services):
     if services.sessions is None:
         raise HTTPException(status_code=503, detail="Session-Manager nicht verfügbar")
@@ -157,6 +161,21 @@ async def rename_session(
     if not body.title.strip():
         raise HTTPException(status_code=422, detail="title must not be empty")
     summary = _manager(services).rename(session_id, body.title)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Unbekannte Session")
+    return summary
+
+
+@router.post("/sessions/{session_id}/model")
+async def set_session_model(
+    session_id: str, body: ModelBody, services: Services = Depends(get_services)
+) -> dict[str, Any]:
+    """Switch a session's model; works while it runs."""
+    _summary_or_404(services, session_id)
+    try:
+        summary = await _manager(services).set_model(session_id, body.model)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Modell konnte nicht gewechselt werden: {exc}") from exc
     if summary is None:
         raise HTTPException(status_code=404, detail="Unbekannte Session")
     return summary
