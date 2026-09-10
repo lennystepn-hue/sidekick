@@ -8,15 +8,25 @@ import { useAppStore } from "../stores/app";
 import { fmtDateTime } from "../utils/format";
 
 /** German names of the sidecar's limit windows; unknown keys keep their id. */
-const WINDOW_LABEL: Record<string, string> = { five_hour: "5 Stunden", seven_day: "7 Tage" };
+const WINDOW_LABEL: Record<string, string> = {
+  five_hour: "5 Stunden",
+  seven_day: "7 Tage",
+  seven_day_opus: "7 Tage Opus",
+  seven_day_sonnet: "7 Tage Sonnet",
+};
 const pct = (v: number | null | undefined): number | null => (v == null ? null : Math.round(v * 100));
 
 const app = useAppStore();
 const limit = computed(() => app.rateLimit);
-/** The five-hour window carries the number people watch; the overall value is the fallback. */
-const percent = computed(() => pct(limit.value?.windows?.five_hour?.utilization ?? limit.value?.utilization));
+/** The window the sidecar named (the one that is running out), else the five-hour window people watch. */
+const leading = computed(() => {
+  const l = limit.value;
+  if (!l) return null;
+  return (l.rate_limit_type ? l.windows?.[l.rate_limit_type] : null) ?? l.windows?.five_hour ?? null;
+});
+const percent = computed(() => pct(leading.value?.utilization ?? limit.value?.utilization));
 const until = computed(() => {
-  const at = limit.value?.resets_at ?? limit.value?.windows?.five_hour?.resets_at ?? null;
+  const at = limit.value?.resets_at ?? leading.value?.resets_at ?? limit.value?.windows?.five_hour?.resets_at ?? null;
   return at ? fmtDateTime(at) : "";
 });
 /** "" hides the chip: everything allowed and the window below 80 %. Any status but "allowed" is worth showing. */
@@ -30,7 +40,9 @@ const tone = computed<"" | "quiet" | "warn" | "err">(() => {
 const chipClass = computed(() => (tone.value === "quiet" ? "" : tone.value));
 const text = computed(() => {
   if (tone.value === "err") return "Limit erreicht";
-  return percent.value == null ? "Limit fast erreicht" : `Limit ${percent.value} %`;
+  const window = limit.value?.rate_limit_type;
+  const name = window && window !== "five_hour" ? ` ${WINDOW_LABEL[window] ?? window}` : "";
+  return percent.value == null ? "Limit fast erreicht" : `Limit${name} ${percent.value} %`;
 });
 const title = computed(() => {
   const l = limit.value;
